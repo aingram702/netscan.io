@@ -1,8 +1,22 @@
-// DOM Elements (add to existing)
+// DOM Elements
+const startScanBtn = document.getElementById('startScan');
+const stopScanBtn = document.getElementById('stopScan');
+const clearResultsBtn = document.getElementById('clearResults');
+const targetIPInput = document.getElementById('targetIP');
+const scanTypeSelect = document.getElementById('scanType');
+const portsInput = document.getElementById('ports');
+const autoRotateIPCheckbox = document.getElementById('autoRotateIP');
+const rotationIntervalSelect = document.getElementById('rotationInterval');
+const terminal = document.getElementById('terminal');
+const resultsContainer = document.getElementById('resultsContainer');
+const currentIPSpan = document.getElementById('currentIP');
+const scanStatusSpan = document.getElementById('scanStatus');
+const hostsFoundSpan = document.getElementById('hostsFound');
+
+// Export Buttons
 const exportJSONBtn = document.getElementById('exportJSON');
 const exportCSVBtn = document.getElementById('exportCSV');
 const exportPDFBtn = document.getElementById('exportPDF');
-const hostsFoundSpan = document.getElementById('hostsFound');
 
 // Visualization Elements
 const vizTabs = document.querySelectorAll('.viz-tab');
@@ -10,15 +24,150 @@ const networkMapCanvas = document.getElementById('networkMap');
 const portChartCanvas = document.getElementById('portChart');
 const serviceChartCanvas = document.getElementById('serviceChart');
 
-// State (add to existing)
+// State
+let isScanning = false;
+let scanAbortController = null;
+let ipRotationInterval = null;
 let scanResults = [];
 let networkChart = null;
 let portChart = null;
 let serviceChart = null;
 
-// ... (previous code remains the same) ...
+// API Configuration
+const API_BASE_URL = 'http://localhost:5000/api';
 
-// Modified handleScanData function
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    updateVisualizations();
+});
+
+// Event Listeners
+startScanBtn.addEventListener('click', startScan);
+stopScanBtn.addEventListener('click', stopScan);
+clearResultsBtn.addEventListener('click', clearResults);
+exportJSONBtn.addEventListener('click', exportJSON);
+exportCSVBtn.addEventListener('click', exportCSV);
+exportPDFBtn.addEventListener('click', exportPDF);
+
+// Visualization Tab Switching
+vizTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+        const targetTab = tab.dataset.tab;
+        
+        vizTabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        
+        document.querySelectorAll('.viz-panel').forEach(panel => {
+            panel.classList.remove('active');
+        });
+        document.getElementById(`${targetTab}Tab`).classList.add('active');
+    });
+});
+
+// Start Scan
+async function startScan() {
+    const target = targetIPInput.value.trim();
+    const scanType = scanTypeSelect.value;
+    const ports = portsInput.value.trim();
+    
+    if (!target) {
+        addTerminalLine('ERROR', 'Target IP/Range is required', 'red');
+        return;
+    }
+    
+    isScanning = true;
+    scanAbortController = new AbortController();
+    
+    // Update UI
+    startScanBtn.disabled = true;
+    stopScanBtn.disabled = false;
+    scanStatusSpan.textContent = 'SCANNING';
+    scanStatusSpan.className = 'status-value status-scanning';
+    
+    // Clear previous results
+    scanResults = [];
+    resultsContainer.innerHTML = '';
+    
+    // Start IP rotation if enabled
+    if (autoRotateIPCheckbox.checked) {
+        startIPRotation();
+    }
+    
+    // Add scan start message
+    addTerminalLine('INFO', `Starting ${scanType.toUpperCase()} scan on ${target}`, 'cyan');
+    addTerminalLine('INFO', `Source IP: ${currentIPSpan.textContent}`, 'cyan');
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/scan`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                target: target,
+                scanType: scanType,
+                ports: ports,
+                sourceIP: currentIPSpan.textContent
+            }),
+            signal: scanAbortController.signal
+        });
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            
+            if (done) break;
+            
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n').filter(line => line.trim());
+            
+            for (const line of lines) {
+                try {
+                    const data = JSON.parse(line);
+                    handleScanData(data);
+                } catch (e) {
+                    console.error('Error parsing scan data:', e);
+                }
+            }
+        }
+        
+        // Scan complete
+        scanStatusSpan.textContent = 'COMPLETE';
+        scanStatusSpan.className = 'status-value status-complete';
+        addTerminalLine('SUCCESS', 'Scan completed successfully', 'green');
+        
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            addTerminalLine('WARNING', 'Scan stopped by user', 'yellow');
+        } else {
+            addTerminalLine('ERROR', `Scan failed: ${error.message}`, 'red');
+        }
+    } finally {
+        stopScan();
+    }
+}
+
+// Stop Scan
+function stopScan() {
+    if (scanAbortController) {
+        scanAbortController.abort();
+    }
+    
+    isScanning = false;
+    startScanBtn.disabled = false;
+    stopScanBtn.disabled = true;
+    
+    if (scanStatusSpan.textContent === 'SCANNING') {
+        scanStatusSpan.textContent = 'STOPPED';
+        scanStatusSpan.className = 'status-value status-idle';
+    }
+    
+    stopIPRotation();
+}
+
+// Handle Scan Data
 function handleScanData(data) {
     if (data.type === 'log') {
         addTerminalLine(data.level || 'INFO', data.message, data.color || 'cyan');
@@ -30,10 +179,154 @@ function handleScanData(data) {
     }
 }
 
+// Display Host Result
+function displayHostResult(host) {
+    // Remove "no results" message if it exists
+    const noResults = resultsContainer.querySelector('.no-results');
+    if (noResults) {
+        noResults.remove();
+    }
+    
+    const hostCard = document.createElement('div');
+    hostCard.className = 'host-card';
+    
+    hostCard.innerHTML = `
+        <div class="host-header">
+            <span class="host-ip">${host.ip}</span>
+            <span class="host-status ${host.status}">${host.status.toUpperCase()}</span>
+        </div>
+        <div class="host-info">
+            ${host.hostname ? `
+                <div class="info-item">
+                    <span class="info-label">Hostname</span>
+                    <span class="info-value">${host.hostname}</span>
+                </div>
+            ` : ''}
+            ${host.os ? `
+                <div class="info-item">
+                    <span class="info-label">Operating System</span>
+                    <span class="info-value">${host.os}</span>
+                </div>
+            ` : ''}
+            ${host.mac ? `
+                <div class="info-item">
+                    <span class="info-label">MAC Address</span>
+                    <span class="info-value">${host.mac}</span>
+                </div>
+            ` : ''}
+            <div class="info-item">
+                <span class="info-label">Response Time</span>
+                <span class="info-value">${host.latency || 'N/A'}</span>
+            </div>
+        </div>
+        ${host.ports && host.ports.length > 0 ? `
+            <table class="ports-table">
+                <thead>
+                    <tr>
+                        <th>Port</th>
+                        <th>State</th>
+                        <th>Service</th>
+                        <th>Version</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${host.ports.map(port => `
+                        <tr>
+                            <td>${port.port}</td>
+                            <td>${port.state}</td>
+                            <td>${port.service || 'unknown'}</td>
+                            <td>${port.version || 'N/A'}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        ` : ''}
+    `;
+    
+    resultsContainer.appendChild(hostCard);
+}
+
+// Add Terminal Line
+function addTerminalLine(level, message, color = 'cyan') {
+    const line = document.createElement('div');
+    line.className = 'terminal-line';
+    
+    const timestamp = new Date().toLocaleTimeString();
+    
+    line.innerHTML = `
+        <span class="prompt">[${level}]</span>
+        <span class="text-${color}">[${timestamp}] ${message}</span>
+    `;
+    
+    terminal.appendChild(line);
+    terminal.scrollTop = terminal.scrollHeight;
+}
+
+// Clear Terminal
+function clearTerminal() {
+    terminal.innerHTML = `
+        <div class="terminal-line">
+            <span class="prompt">[NetScanner]$</span> 
+            <span class="text-green">System initialized. Ready for reconnaissance...</span>
+        </div>
+    `;
+}
+
+// Clear Results
+function clearResults() {
+    scanResults = [];
+    resultsContainer.innerHTML = `
+        <div class="no-results">
+            <span class="icon">🔍</span>
+            <p>No scan results yet. Start a scan to see data.</p>
+        </div>
+    `;
+    clearTerminal();
+    hostsFoundSpan.textContent = '0';
+    
+    if (networkChart) networkChart.destroy();
+    if (portChart) portChart.destroy();
+    if (serviceChart) serviceChart.destroy();
+    
+    updateVisualizations();
+}
+
 // Update Statistics
 function updateStatistics() {
     const hostsUp = scanResults.filter(h => h.status === 'up').length;
     hostsFoundSpan.textContent = hostsUp;
+}
+
+// IP Rotation Functions
+function startIPRotation() {
+    const intervalSeconds = parseInt(rotationIntervalSelect.value);
+    
+    ipRotationInterval = setInterval(() => {
+        rotateIP();
+    }, intervalSeconds * 1000);
+    
+    addTerminalLine('INFO', `IP rotation enabled (every ${intervalSeconds}s)`, 'cyan');
+}
+
+function stopIPRotation() {
+    if (ipRotationInterval) {
+        clearInterval(ipRotationInterval);
+        ipRotationInterval = null;
+    }
+}
+
+function rotateIP() {
+    const newIP = generateRandomIP();
+    currentIPSpan.textContent = newIP;
+    addTerminalLine('INFO', `IP rotated to ${newIP}`, 'yellow');
+}
+
+function generateRandomIP() {
+    return `${randomInt(1, 255)}.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 255)}`;
+}
+
+function randomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 // Visualization Functions
@@ -53,27 +346,20 @@ function updateNetworkMap() {
     
     const hostsUp = scanResults.filter(h => h.status === 'up');
     const hostsDown = scanResults.filter(h => h.status === 'down');
+    const totalPorts = hostsUp.reduce((sum, h) => sum + (h.ports?.length || 0), 0);
     
     networkChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
             labels: ['Hosts Up', 'Hosts Down', 'Total Ports Open'],
             datasets: [{
-                data: [
-                    hostsUp.length,
-                    hostsDown.length,
-                    hostsUp.reduce((sum, h) => sum + (h.ports?.length || 0), 0)
-                ],
+                data: [hostsUp.length, hostsDown.length, totalPorts],
                 backgroundColor: [
                     'rgba(0, 255, 65, 0.8)',
                     'rgba(255, 85, 85, 0.8)',
                     'rgba(0, 255, 255, 0.8)'
                 ],
-                borderColor: [
-                    '#00ff41',
-                    '#ff5555',
-                    '#00ffff'
-                ],
+                borderColor: ['#00ff41', '#ff5555', '#00ffff'],
                 borderWidth: 2
             }]
         },
@@ -84,20 +370,14 @@ function updateNetworkMap() {
                 legend: {
                     labels: {
                         color: '#00ff41',
-                        font: {
-                            family: 'Fira Code',
-                            size: 14
-                        }
+                        font: { family: 'Fira Code', size: 14 }
                     }
                 },
                 title: {
                     display: true,
                     text: 'Network Overview',
                     color: '#00ff41',
-                    font: {
-                        family: 'Fira Code',
-                        size: 18
-                    }
+                    font: { family: 'Fira Code', size: 18 }
                 }
             }
         }
@@ -112,7 +392,6 @@ function updatePortChart() {
         portChart.destroy();
     }
     
-    // Count port occurrences
     const portCounts = {};
     scanResults.forEach(host => {
         if (host.ports) {
@@ -148,18 +427,14 @@ function updatePortChart() {
                         color: '#00ff41',
                         font: { family: 'Fira Code' }
                     },
-                    grid: {
-                        color: 'rgba(0, 255, 65, 0.1)'
-                    }
+                    grid: { color: 'rgba(0, 255, 65, 0.1)' }
                 },
                 x: {
                     ticks: {
                         color: '#00ff41',
                         font: { family: 'Fira Code' }
                     },
-                    grid: {
-                        color: 'rgba(0, 255, 65, 0.1)'
-                    }
+                    grid: { color: 'rgba(0, 255, 65, 0.1)' }
                 }
             },
             plugins: {
@@ -173,10 +448,7 @@ function updatePortChart() {
                     display: true,
                     text: 'Top 10 Open Ports',
                     color: '#00ff41',
-                    font: {
-                        family: 'Fira Code',
-                        size: 18
-                    }
+                    font: { family: 'Fira Code', size: 18 }
                 }
             }
         }
@@ -191,7 +463,6 @@ function updateServiceChart() {
         serviceChart.destroy();
     }
     
-    // Count service occurrences
     const serviceCounts = {};
     scanResults.forEach(host => {
         if (host.ports) {
@@ -240,10 +511,7 @@ function updateServiceChart() {
                     display: true,
                     text: 'Service Distribution',
                     color: '#00ff41',
-                    font: {
-                        family: 'Fira Code',
-                        size: 18
-                    }
+                    font: { family: 'Fira Code', size: 18 }
                 }
             },
             scales: {
@@ -252,31 +520,12 @@ function updateServiceChart() {
                         color: '#00ff41',
                         backdropColor: 'transparent'
                     },
-                    grid: {
-                        color: 'rgba(0, 255, 65, 0.2)'
-                    }
+                    grid: { color: 'rgba(0, 255, 65, 0.2)' }
                 }
             }
         }
     });
 }
-
-// Tab Switching
-vizTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-        const targetTab = tab.dataset.tab;
-        
-        // Update tab buttons
-        vizTabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        
-        // Update panels
-        document.querySelectorAll('.viz-panel').forEach(panel => {
-            panel.classList.remove('active');
-        });
-        document.getElementById(`${targetTab}Tab`).classList.add('active');
-    });
-});
 
 // Export Functions
 function exportJSON() {
@@ -339,7 +588,7 @@ async function exportPDF() {
     
     // Title
     pdf.setFontSize(20);
-    pdf.setTextColor(0, 255, 65);
+    pdf.setTextColor(0, 100, 0);
     pdf.text('NetScanner Pro - Scan Report', 20, 20);
     
     // Metadata
@@ -392,42 +641,41 @@ async function exportPDF() {
         }
         
         if (host.ports && host.ports.length > 0) {
-            pdf.text(`   Open Ports: ${host.ports.map(p => `${p.port}(${p.service})`).join(', ')}`, 25, yPos);
-            yPos += 5;
+            const portList = host.ports.map(p => `${p.port}(${p.service})`).join(', ');
+            const lines = pdf.splitTextToSize(`   Open Ports: ${portList}`, 170);
+            lines.forEach(line => {
+                if (yPos > 270) {
+                    pdf.addPage();
+                    yPos = 20;
+                }
+                pdf.text(line, 25, yPos);
+                yPos += 5;
+            });
         }
         
         yPos += 3;
     });
     
-    // Add Charts as Images
+    // Add Charts
     try {
         pdf.addPage();
         pdf.setFontSize(14);
+        pdf.setTextColor(0, 0, 0);
         pdf.text('Network Visualizations', 20, 20);
         
-        // Capture network chart
-        const networkImg = await captureChart(networkMapCanvas);
-        if (networkImg) {
-            pdf.addImage(networkImg, 'PNG', 20, 30, 170, 85);
-        }
+        const networkImg = networkMapCanvas.toDataURL('image/png');
+        pdf.addImage(networkImg, 'PNG', 20, 30, 170, 85);
         
-        // Capture port chart
-        const portImg = await captureChart(portChartCanvas);
-        if (portImg) {
-            pdf.addImage(portImg, 'PNG', 20, 130, 170, 85);
-        }
+        const portImg = portChartCanvas.toDataURL('image/png');
+        pdf.addImage(portImg, 'PNG', 20, 130, 170, 85);
         
-        // New page for service chart
         pdf.addPage();
-        const serviceImg = await captureChart(serviceChartCanvas);
-        if (serviceImg) {
-            pdf.addImage(serviceImg, 'PNG', 20, 30, 170, 85);
-        }
+        const serviceImg = serviceChartCanvas.toDataURL('image/png');
+        pdf.addImage(serviceImg, 'PNG', 20, 30, 170, 85);
     } catch (error) {
         console.error('Error adding charts to PDF:', error);
     }
     
-    // Save PDF
     pdf.save(`netscan_${Date.now()}.pdf`);
     
     addTerminalLine('SUCCESS', 'PDF report generated successfully', 'green');
@@ -435,19 +683,6 @@ async function exportPDF() {
     setTimeout(() => exportPDFBtn.classList.remove('export-success'), 500);
 }
 
-// Helper function to capture chart as image
-function captureChart(canvas) {
-    return new Promise((resolve) => {
-        try {
-            const img = canvas.toDataURL('image/png');
-            resolve(img);
-        } catch (error) {
-            resolve(null);
-        }
-    });
-}
-
-// Download file helper
 function downloadFile(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -458,31 +693,3 @@ function downloadFile(blob, filename) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 }
-
-// Modified clearResults to reset visualizations
-function clearResults() {
-    scanResults = [];
-    resultsContainer.innerHTML = `
-        <div class="no-results">
-            <span class="icon">🔍</span>
-            <p>No scan results yet. Start a scan to see data.</p>
-        </div>
-    `;
-    clearTerminal();
-    hostsFoundSpan.textContent = '0';
-    
-    // Clear charts
-    if (networkChart) networkChart.destroy();
-    if (portChart) portChart.destroy();
-    if (serviceChart) serviceChart.destroy();
-}
-
-// Event Listeners (add to existing)
-exportJSONBtn.addEventListener('click', exportJSON);
-exportCSVBtn.addEventListener('click', exportCSV);
-exportPDFBtn.addEventListener('click', exportPDF);
-
-// Initialize visualizations on load
-document.addEventListener('DOMContentLoaded', () => {
-    updateVisualizations();
-});
