@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetScanner Pro - Network Reconnaissance</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="scanner-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">⚡</span>
+                <h1>NetScanner<span class="pro">PRO</span></h1>
+            </div>
+            <div class="status-bar">
+                <span class="status-item">
+                    <span class="status-label">Current IP:</span>
+                    <span id="currentIP" class="status-value">192.168.1.1</span>
+                </span>
+                <span class="status-item">
+                    <span class="status-label">Status:</span>
+                    <span id="scanStatus" class="status-value status-idle">IDLE</span>
+                </span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Control Panel -->
+            <section class="control-panel">
+                <h2 class="section-title">⚙️ Scan Configuration</h2>
+                
+                <div class="input-group">
+                    <label for="targetIP">Target IP/Range:</label>
+                    <input type="text" id="targetIP" placeholder="192.168.1.1 or 192.168.1.0/24" value="192.168.1.1">
+                </div>
+
+                <div class="input-group">
+                    <label for="scanType">Scan Type:</label>
+                    <select id="scanType">
+                        <option value="ping">Ping Scan (Host Discovery)</option>
+                        <option value="quick">Quick Scan (Top 100 Ports)</option>
+                        <option value="full">Full Scan (All 65535 Ports)</option>
+                        <option value="stealth">Stealth Scan (SYN)</option>
+                        <option value="service">Service Detection</option>
+                        <option value="os">OS Detection</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="ports">Custom Ports (optional):</label>
+                    <input type="text" id="ports" placeholder="22,80,443 or 1-1000">
+                </div>
+
+                <div class="checkbox-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="autoRotateIP">
+                        <span>Auto-Rotate IP Address</span>
+                    </label>
+                    <div class="ip-rotation-settings">
+                        <label for="rotationInterval">Rotate Every:</label>
+                        <select id="rotationInterval">
+                            <option value="30">30 seconds</option>
+                            <option value="60" selected>1 minute</option>
+                            <option value="120">2 minutes</option>
+                            <option value="300">5 minutes</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button id="startScan" class="btn btn-primary">
+                        <span class="btn-icon">🚀</span> Start Scan
+                    </button>
+                    <button id="stopScan" class="btn btn-danger" disabled>
+                        <span class="btn-icon">⛔</span> Stop Scan
+                    </button>
+                    <button id="clearResults" class="btn btn-secondary">
+                        <span class="btn-icon">🗑️</span> Clear Results
+                    </button>
+                </div>
+            </section>
+
+            <!-- Terminal Output -->
+            <section class="terminal-section">
+                <div class="terminal-header">
+                    <span class="terminal-title">📟 Scan Output</span>
+                    <div class="terminal-controls">
+                        <span class="terminal-dot red"></span>
+                        <span class="terminal-dot yellow"></span>
+                        <span class="terminal-dot green"></span>
+                    </div>
+                </div>
+                <div id="terminal" class="terminal">
+                    <div class="terminal-line">
+                        <span class="prompt">[NetScanner]$</span> 
+                        <span class="text-green">System initialized. Ready for reconnaissance...</span>
+                    </div>
+                    <div class="terminal-line">
+                        <span class="prompt">[INFO]</span> 
+                        <span class="text-cyan">Configure scan parameters and click "Start Scan"</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Results Panel -->
+            <section class="results-panel">
+                <h2 class="section-title">📊 Scan Results</h2>
+                <div id="resultsContainer" class="results-container">
+                    <div class="no-results">
+                        <span class="icon">🔍</span>
+                        <p>No scan results yet. Start a scan to see data.</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>⚠️ <strong>EDUCATIONAL USE ONLY</strong> - Only scan networks you own or have permission to test</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
