@@ -1,152 +1,124 @@
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, send_file
 from flask_cors import CORS
-import subprocess
 import json
-import re
 import time
 import random
-from threading import Thread
+import os
+from datetime import datetime
+from io import BytesIO
+import csv
 
 app = Flask(__name__)
 CORS(app)
 
-# Simulated scan data (replace with real nmap in production)
-def simulate_scan(target, scan_type, ports, source_ip):
-    """
-    Simulates network scanning. In production, use actual nmap:
-    subprocess.run(['nmap', '-A', target], capture_output=True, text=True)
+EXPORTS_DIR = 'exports'
+os.makedirs(EXPORTS_DIR, exist_ok=True)
+
+# Simulated data
+COMMON_PORTS = {
+    21: 'ftp', 22: 'ssh', 23: 'telnet', 25: 'smtp', 53: 'dns',
+    80: 'http', 110: 'pop3', 143: 'imap', 443: 'https', 445: 'smb',
+    3306: 'mysql', 3389: 'rdp', 5432: 'postgresql', 6379: 'redis',
+    8080: 'http-proxy', 8443: 'https-alt', 27017: 'mongodb'
+}
+
+OS_FINGERPRINTS = [
+    'Linux 5.x', 'Windows 10', 'Windows Server 2019', 'macOS 12.x',
+    'Ubuntu 20.04', 'CentOS 7', 'FreeBSD 13.x', 'Android 11'
+]
+
+HOSTNAMES = [
+    'router.local', 'server01.local', 'workstation.local', 'nas.local',
+    'printer.local', 'switch.local', 'gateway.local', 'database.local'
+]
+
+def generate_random_ip(base='192.168.1'):
+    return f"{base}.{random.randint(1, 254)}"
+
+def generate_mac_address():
+    return ':'.join([f'{random.randint(0, 255):02x}' for _ in range(6)])
+
+def simulate_scan(target, scan_type, ports=None, source_ip=None):
+    """Simulate network scan and yield results"""
     
-    ⚠️ WARNING: Only use on networks you own or have permission to scan!
-    """
+    # Send initial log
     yield json.dumps({
         'type': 'log',
         'level': 'INFO',
-        'message': f'Starting {scan_type} scan from {source_ip}...',
+        'message': f'Initiating {scan_type} scan on {target}',
         'color': 'cyan'
     }) + '\n'
     
-    time.sleep(1)
+    time.sleep(0.5)
     
-    # Parse target (handle CIDR notation)
+    # Parse target range
     if '/' in target:
-        # Simulate subnet scan
-        base_ip = target.split('/')[0]
-        ip_parts = base_ip.split('.')
-        
-        for i in range(1, 6):  # Scan 5 hosts for demo
-            host_ip = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}.{i}"
-            
-            yield json.dumps({
-                'type': 'log',
-                'level': 'SCAN',
-                'message': f'Scanning host {host_ip}...',
-                'color': 'yellow'
-            }) + '\n'
-            
-            time.sleep(0.5)
-            
-            # Random host up/down
-            is_up = random.choice([True, True, False])
-            
-            if is_up:
-                open_ports = []
-                
-                # Simulate port scanning
-                common_ports = [
-                    (22, 'ssh'), (80, 'http'), (443, 'https'),
-                    (3306, 'mysql'), (5432, 'postgresql'), (8080, 'http-alt')
-                ]
-                
-                for port, service in random.sample(common_ports, random.randint(1, 4)):
-                    open_ports.append({'port': port, 'service': service})
-                
-                yield json.dumps({
-                    'type': 'host',
-                    'ip': host_ip,
-                    'status': 'up',
-                    'hostname': f'host-{i}.example.com',
-                    'os': random.choice(['Linux 5.x', 'Windows 10', 'macOS']),
-                    'ports': open_ports
-                }) + '\n'
-                
-                yield json.dumps({
-                    'type': 'log',
-                    'level': 'SUCCESS',
-                    'message': f'Host {host_ip} is UP - {len(open_ports)} open ports found',
-                    'color': 'green'
-                }) + '\n'
-            else:
-                yield json.dumps({
-                    'type': 'host',
-                    'ip': host_ip,
-                    'status': 'down',
-                    'ports': []
-                }) + '\n'
-                
-                yield json.dumps({
-                    'type': 'log',
-                    'level': 'INFO',
-                    'message': f'Host {host_ip} is DOWN',
-                    'color': 'cyan'
-                }) + '\n'
-    
+        base_ip = target.split('/')[0].rsplit('.', 1)[0]
+        num_hosts = random.randint(5, 15)
     else:
-        # Single host scan
+        base_ip = target.rsplit('.', 1)[0]
+        num_hosts = 1
+    
+    # Scan hosts
+    for i in range(num_hosts):
+        time.sleep(random.uniform(0.3, 0.8))
+        
+        ip = generate_random_ip(base_ip)
+        is_up = random.random() > 0.3  # 70% chance host is up
+        
         yield json.dumps({
             'type': 'log',
-            'level': 'SCAN',
-            'message': f'Performing deep scan on {target}...',
-            'color': 'yellow'
+            'level': 'INFO',
+            'message': f'Scanning {ip}...',
+            'color': 'white'
         }) + '\n'
         
-        time.sleep(1)
-        
-        # Simulate detailed scan
-        open_ports = [
-            {'port': 22, 'service': 'ssh'},
-            {'port': 80, 'service': 'http'},
-            {'port': 443, 'service': 'https'},
-            {'port': 3306, 'service': 'mysql'}
-        ]
-        
-        yield json.dumps({
+        host_data = {
             'type': 'host',
-            'ip': target,
-            'status': 'up',
-            'hostname': 'target.example.com',
-            'os': 'Linux 5.15.0 (Ubuntu)',
-            'ports': open_ports
-        }) + '\n'
-    
-    yield json.dumps({
-        'type': 'log',
-        'level': 'COMPLETE',
-        'message': 'Scan completed successfully',
-        'color': 'green'
-    }) + '\n'
-
-@app.route('/api/scan', methods=['POST'])
-def scan():
-    data = request.json
-    target = data.get('target')
-    scan_type = data.get('scanType', 'quick')
-    ports = data.get('ports')
-    source_ip = data.get('sourceIP')
-    
-    if not target:
-        return jsonify({'error': 'Target IP is required'}), 400
-    
-    # Stream scan results
-    return Response(
-        simulate_scan(target, scan_type, ports, source_ip),
-        mimetype='application/x-ndjson'
-    )
-
-@app.route('/api/health', methods=['GET'])
-def health():
-    return jsonify({'status': 'ok', 'service': 'NetScanner Pro API'})
-
-if __name__ == '__main__':
-    print("🚀 NetScanner Pro Backend Starting...")
-    print("⚠️  EDUCATIONAL USE ONLY - Scan responsibly!")
-    app.run(debug=True, port=5000)
+            'ip': ip,
+            'status': 'up' if is_up else 'down',
+            'latency': f'{random.randint(1, 50)}ms' if is_up else None
+        }
+        
+        if is_up:
+            # Add hostname (50% chance)
+            if random.random() > 0.5:
+                host_data['hostname'] = random.choice(HOSTNAMES)
+            
+            # Add MAC address
+            host_data['mac'] = generate_mac_address()
+            
+            # Add OS detection
+            if scan_type in ['os', 'service', 'full']:
+                host_data['os'] = random.choice(OS_FINGERPRINTS)
+            
+            # Add port scan results
+            if scan_type != 'ping':
+                open_ports = []
+                
+                if scan_type == 'quick':
+                    port_list = random.sample(list(COMMON_PORTS.keys()), random.randint(2, 6))
+                elif scan_type == 'full':
+                    port_list = random.sample(list(COMMON_PORTS.keys()), random.randint(5, 10))
+                else:
+                    port_list = random.sample(list(COMMON_PORTS.keys()), random.randint(3, 8))
+                
+                for port in port_list:
+                    port_info = {
+                        'port': port,
+                        'state': 'open',
+                        'service': COMMON_PORTS.get(port, 'unknown')
+                    }
+                    
+                    # Add version info for service scans
+                    if scan_type in ['service', 'full']:
+                        versions = {
+                            'ssh': 'OpenSSH 8.2',
+                            'http': 'Apache 2.4.41',
+                            'https': 'nginx 1.18.0',
+                            'mysql': 'MySQL 8.0.23',
+                            'ftp': 'vsftpd 3.0.3'
+                        }
+                        port_info['version'] = versions.get(port_info['service'], 'N/A')
+                    
+                
