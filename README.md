@@ -1,9 +1,6 @@
 # 📡 NetScanner Pro - Web-Based Network Scanner
-<img src="https://img.shields.io/badge/version-1.0.0-green" alt="Version" />
-<img src="https://img.shields.io/badge/license-MIT-blue" alt="License" />
-<img src="https://img.shields.io/badge/python-3.8+-blue" alt="Python" />
-<img src="https://img.shields.io/badge/html5-%23E34F26.svg?&style=flat&logo=html5&logoColor=white" alt="HTML5" />
-<img src="https://img.shields.io/badge/javascript-%23323330.svg?&style=flat&logo=javascript&logoColor=%23F7DF1E" alt="JavaScript" />
+<img src="https://img.shields.io/badge/version-1.0.0-green" alt="Version" /> <img src="https://img.shields.io/badge/license-MIT-blue" alt="License" /> <img src="https://img.shields.io/badge/python-3.8+-blue" alt="Python" /> <img src="https://img.shields.io/badge/html5-%23E34F26.svg?&style=flat&logo=html5&logoColor=white" alt="HTML5" /> <img src="https://img.shields.io/badge/javascript-%23323330.svg?&style=flat&logo=javascript&logoColor=%23F7DF1E" alt="JavaScript" />
+
 NetScanner Pro is a powerful, modern web-based network reconnaissance tool with a sleek hacker-inspired UI. Built for educational purposes and authorized penetration testing.
 <img src="https://via.placeholder.com/1200x600/0a0e27/00ff41?text=NetScanner+Pro+Dashboard" alt="NetScanner Pro Screenshot" />
 
