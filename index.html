@@ -6,6 +6,9 @@
     <title>NetScanner Pro - Network Reconnaissance</title>
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
     <div class="scanner-container">
@@ -24,6 +27,10 @@
                     <span class="status-label">Status:</span>
                     <span id="scanStatus" class="status-value status-idle">IDLE</span>
                 </span>
+                <span class="status-item">
+                    <span class="status-label">Hosts Found:</span>
+                    <span id="hostsFound" class="status-value">0</span>
+                </span>
             </div>
         </header>
 
@@ -35,7 +42,7 @@
                 
                 <div class="input-group">
                     <label for="targetIP">Target IP/Range:</label>
-                    <input type="text" id="targetIP" placeholder="192.168.1.1 or 192.168.1.0/24" value="192.168.1.1">
+                    <input type="text" id="targetIP" placeholder="192.168.1.1 or 192.168.1.0/24" value="192.168.1.0/24">
                 </div>
 
                 <div class="input-group">
@@ -82,6 +89,22 @@
                         <span class="btn-icon">🗑️</span> Clear Results
                     </button>
                 </div>
+
+                <!-- Export Options -->
+                <div class="export-section">
+                    <h3 class="subsection-title">📤 Export Results</h3>
+                    <div class="button-group">
+                        <button id="exportJSON" class="btn btn-export">
+                            <span class="btn-icon">📄</span> JSON
+                        </button>
+                        <button id="exportCSV" class="btn btn-export">
+                            <span class="btn-icon">📊</span> CSV
+                        </button>
+                        <button id="exportPDF" class="btn btn-export">
+                            <span class="btn-icon">📕</span> PDF
+                        </button>
+                    </div>
+                </div>
             </section>
 
             <!-- Terminal Output -->
@@ -102,6 +125,34 @@
                     <div class="terminal-line">
                         <span class="prompt">[INFO]</span> 
                         <span class="text-cyan">Configure scan parameters and click "Start Scan"</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Visualization Section -->
+            <section class="visualization-section">
+                <h2 class="section-title">📈 Network Visualization</h2>
+                
+                <div class="viz-tabs">
+                    <button class="viz-tab active" data-tab="network">Network Map</button>
+                    <button class="viz-tab" data-tab="ports">Port Distribution</button>
+                    <button class="viz-tab" data-tab="services">Service Analysis</button>
+                </div>
+
+                <div class="viz-content">
+                    <!-- Network Map -->
+                    <div id="networkTab" class="viz-panel active">
+                        <canvas id="networkMap"></canvas>
+                    </div>
+
+                    <!-- Port Distribution -->
+                    <div id="portsTab" class="viz-panel">
+                        <canvas id="portChart"></canvas>
+                    </div>
+
+                    <!-- Service Analysis -->
+                    <div id="servicesTab" class="viz-panel">
+                        <canvas id="serviceChart"></canvas>
                     </div>
                 </div>
             </section>
