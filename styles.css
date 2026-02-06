@@ -459,7 +459,169 @@ body {
     .button-group {
         flex-direction: column;
     }
-    
+
+
+    /* ... (previous CSS remains the same) ... */
+
+/* Export Section */
+.export-section {
+    margin-top: 25px;
+    padding-top: 20px;
+    border-top: 1px solid #333;
+}
+
+.subsection-title {
+    font-size: 1rem;
+    margin-bottom: 15px;
+    color: #00ffff;
+}
+
+.btn-export {
+    background: rgba(0, 255, 255, 0.1);
+    color: #00ffff;
+    border: 1px solid #00ffff;
+}
+
+.btn-export:hover {
+    background: rgba(0, 255, 255, 0.2);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(0, 255, 255, 0.3);
+}
+
+/* Visualization Section */
+.visualization-section {
+    grid-column: 1 / -1;
+    background: rgba(15, 20, 40, 0.8);
+    border: 2px solid #00ff41;
+    border-radius: 10px;
+    padding: 25px;
+    box-shadow: 0 0 20px rgba(0, 255, 65, 0.2);
+    margin-bottom: 20px;
+}
+
+.viz-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.viz-tab {
+    flex: 1;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #555;
+    border-radius: 5px;
+    color: #888;
+    font-family: 'Fira Code', monospace;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.viz-tab:hover {
+    background: rgba(0, 0, 0, 0.5);
+    color: #00ff41;
+}
+
+.viz-tab.active {
+    background: rgba(0, 255, 65, 0.2);
+    border-color: #00ff41;
+    color: #00ff41;
+}
+
+.viz-content {
+    position: relative;
+    min-height: 400px;
+}
+
+.viz-panel {
+    display: none;
+    animation: fadeIn 0.3s ease-in;
+}
+
+.viz-panel.active {
+    display: block;
+}
+
+.viz-panel canvas {
+    max-height: 400px;
+    width: 100% !important;
+    height: auto !important;
+}
+
+/* Network Map Styles */
+#networkMap {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 5px;
+}
+
+/* Stats Grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.stat-card {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #00ff41;
+    border-radius: 5px;
+    padding: 15px;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 2rem;
+    color: #00ff41;
+    font-weight: bold;
+    display: block;
+    margin-bottom: 5px;
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: #888;
+    text-transform: uppercase;
+}
+
+/* Export Modal (Optional) */
+.export-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+}
+
+.export-modal.active {
+    display: flex;
+}
+
+.modal-content {
+    background: rgba(15, 20, 40, 0.95);
+    border: 2px solid #00ff41;
+    border-radius: 10px;
+    padding: 30px;
+    max-width: 500px;
+    width: 90%;
+}
+
+/* Animation for export success */
+@keyframes successPulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+.export-success {
+    animation: successPulse 0.5s ease-in-out;
+}
+
     .status-bar {
         flex-direction: column;
         gap: 10px;
