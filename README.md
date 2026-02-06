@@ -9,17 +9,11 @@ NetScanner Pro is a powerful, modern web-based network reconnaissance tool with 
 🎯 Core Scanning Capabilities
 
 Multiple Scan Types
-
 🔍 Ping Scan (Host Discovery) 
-
 ⚡ Quick Scan (Top 100 Ports) 
-
 🔬 Full Scan (All 65,535 Ports) 
-
 🥷 Stealth Scan (SYN Scan) 
-
 🔧 Service Detection 
-
 🖥️ OS Fingerprinting 
 
 
