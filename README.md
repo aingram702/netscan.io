@@ -1,4 +1,4 @@
-📡 NetScanner Pro - Web-Based Network Scanner
+# 📡 NetScanner Pro - Web-Based Network Scanner
 <img src="https://img.shields.io/badge/version-1.0.0-green" alt="Version" />
 <img src="https://img.shields.io/badge/license-MIT-blue" alt="License" />
 <img src="https://img.shields.io/badge/python-3.8+-blue" alt="Python" />
@@ -7,7 +7,7 @@
 NetScanner Pro is a powerful, modern web-based network reconnaissance tool with a sleek hacker-inspired UI. Built for educational purposes and authorized penetration testing.
 <img src="https://via.placeholder.com/1200x600/0a0e27/00ff41?text=NetScanner+Pro+Dashboard" alt="NetScanner Pro Screenshot" />
 
-⚡ Features
+## ⚡ Features
 🎯 Core Scanning Capabilities
 
 Multiple Scan Types
@@ -20,26 +20,26 @@ Multiple Scan Types
 
 
 
-🔄 IP Rotation & Privacy
+## 🔄 IP Rotation & Privacy
 
 Automatic IP Rotation - Change source IP at customizable intervals (30s to 5min)
 Real-time IP Display - Current source IP shown in header
 Privacy-First Design - Configurable rotation settings
 
-📊 Advanced Visualization
+## 📊 Advanced Visualization
 
 Network Map - Interactive doughnut chart showing network overview
 Port Distribution - Bar chart of most common open ports
 Service Analysis - Polar area chart of detected services
 Real-time Updates - Charts update as scan progresses
 
-📤 Export Options
+## 📤 Export Options
 
 JSON Export - Complete scan data with metadata
 CSV Export - Excel-compatible spreadsheet format
 PDF Reports - Professional reports with embedded charts and statistics
 
-💻 User Experience
+## 💻 User Experience
 
 Dark Hacker Theme - Matrix-inspired green/pink aesthetic
 Live Terminal Output - Real-time scan progress
@@ -47,7 +47,7 @@ Responsive Design - Works on desktop, tablet, and mobile
 Intuitive Controls - Easy-to-use interface for all skill levels
 
 
-🚀 Quick Start
+## 🚀 Quick Start
 Prerequisites
 
 Python 3.8+
@@ -96,7 +96,7 @@ Click Start Scan
 Watch results appear in real-time
 
 
-📁 Project Structure
+## 📁 Project Structure
 netscanner-pro/
 ├── index.html          # Main frontend interface
 ├── styles.css          # Dark hacker-themed styling
@@ -156,7 +156,7 @@ Click export buttons after scan completes:
 📕 PDF - Professional report with charts
 
 
-⚙️ Configuration
+## ⚙️ Configuration
 Backend Server Settings
 Edit server.py:
 # Change server port
@@ -181,7 +181,7 @@ Edit styles.css:
 --secondary-color: #ff0080;  /* Cyber pink */
 --background: #0a0e27;       /* Dark blue */
 
-🔌 API Reference
+## 🔌 API Reference
 Endpoints
 POST /api/scan
 Start a network scan
@@ -303,7 +303,7 @@ def send_notification(message):
 # Use in scan completion
 send_notification(f'Scan complete: {hosts_up} hosts found')
 
-🔒 Security & Legal
+## 🔒 Security & Legal
 ⚠️ IMPORTANT WARNINGS
 LEGAL USE ONLY
 
@@ -356,7 +356,7 @@ Respect privacy requirements
 
 
 
-🐛 Troubleshooting
+## 🐛 Troubleshooting
 Backend Won't Start
 Problem: ModuleNotFoundError: No module named 'flask'
 Solution:
@@ -405,7 +405,7 @@ Import into Excel using UTF-8 encoding
 Use "Data > From Text/CSV" in Excel
 
 
-🚧 Roadmap
+## 🚧 Roadmap
 Planned Features
 
  Real Nmap Integration - Direct nmap execution
@@ -430,7 +430,7 @@ Automated remediation suggestions
 Integration with SIEM platforms
 
 
-🤝 Contributing
+## 🤝 Contributing
 Contributions are welcome! Please follow these guidelines:
 How to Contribute
 
@@ -460,7 +460,7 @@ Check responsive design
 Test on multiple browsers
 
 
-📄 License
+## 📄 License
 This project is licensed under the MIT License.
 MIT License
 
@@ -484,7 +484,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-🙏 Acknowledgments
+## 🙏 Acknowledgments
 
 Nmap - The inspiration for this project
 Chart.js - Beautiful data visualizations
@@ -493,7 +493,7 @@ Font Awesome - Icon library
 Fira Code - Monospace font for terminal aesthetic
 
 
-📞 Support
+## 📞 Support
 Get Help
 
 Documentation: Read this README carefully
@@ -511,15 +511,8 @@ Browser/OS information
 Console error messages
 Screenshots if applicable
 
-🌟 Show Your Support
+## 🌟 Show Your Support
 If you find this project useful, please consider:
-
-⭐ Starring the repository
-🐛 Reporting bugs
-💡 Suggesting new features
-🤝 Contributing code
-📢 Sharing with others
-
 
 <div align="center">
 
