@@ -356,4 +356,5 @@ if __name__ == '__main__':
     print('-' * 50)
     
     # Set debug=False for production
-    app.run(host='127.0.0.1', port=5000, debug=False)
+    # Bind to 0.0.0.0 to allow access from network PCs
+    app.run(host='0.0.0.0', port=5000, debug=False)
