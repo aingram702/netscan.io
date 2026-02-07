@@ -356,6 +356,15 @@ function updateStatistics() {
 function startIPRotation() {
     const intervalSeconds = parseInt(rotationIntervalSelect.value);
 
+    // Rotate immediately on start
+    rotateIP();
+
+    // If interval is 0, rotate on every request (handled in startScan)
+    if (intervalSeconds === 0) {
+        addTerminalLine('INFO', 'IP rotation: Every request (random IP per scan)', 'cyan');
+        return;
+    }
+
     ipRotationInterval = setInterval(() => {
         rotateIP();
     }, intervalSeconds * 1000);
@@ -377,7 +386,16 @@ function rotateIP() {
 }
 
 function generateRandomIP() {
-    return `${randomInt(1, 255)}.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 255)}`;
+    // Generate completely random IP (avoiding reserved ranges)
+    const classes = [
+        // Class A private-like ranges (simulating diverse source IPs)
+        () => `${randomInt(1, 126)}.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 254)}`,
+        // Class B style
+        () => `${randomInt(128, 191)}.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 254)}`,
+        // Class C style  
+        () => `${randomInt(192, 223)}.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 254)}`
+    ];
+    return classes[randomInt(0, 2)]();
 }
 
 function randomInt(min, max) {
