@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, Response, send_file
+from flask import Flask, request, jsonify, Response, send_file, send_from_directory
 from flask_cors import CORS
 import json
 import time
@@ -8,11 +8,24 @@ from datetime import datetime
 from io import BytesIO
 import csv
 
-app = Flask(__name__)
+# Get the directory where server.py is located
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+app = Flask(__name__, static_folder=BASE_DIR, static_url_path='')
 CORS(app)
 
-EXPORTS_DIR = 'exports'
+EXPORTS_DIR = os.path.join(BASE_DIR, 'exports')
 os.makedirs(EXPORTS_DIR, exist_ok=True)
+
+
+# Serve static files (HTML, CSS, JS)
+@app.route('/')
+def serve_index():
+    return send_from_directory(BASE_DIR, 'index.html')
+
+@app.route('/<path:filename>')
+def serve_static(filename):
+    return send_from_directory(BASE_DIR, filename)
 
 # Simulated data
 COMMON_PORTS = {

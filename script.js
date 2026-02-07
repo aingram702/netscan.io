@@ -57,8 +57,8 @@ function setLoadingState(isLoading) {
     }
 }
 
-// API Configuration - Use current host for network access
-const API_BASE_URL = `http://${window.location.hostname || 'localhost'}:5000/api`;
+// API Configuration - Flask serves both static files and API on port 5000
+const API_BASE_URL = `http://${window.location.hostname}:5000/api`;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
