@@ -5,25 +5,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description"
-        content="NetScanner Pro - A powerful web-based network reconnaissance tool for educational purposes and authorized penetration testing.">
-    <meta name="keywords" content="network scanner, port scanner, security, penetration testing, nmap, cybersecurity">
+        content="NetScanner Pro - A real nmap-powered web-based network scanner for authorized penetration testing and cybersecurity education.">
+    <meta name="keywords" content="network scanner, port scanner, nmap, security, penetration testing, cybersecurity">
     <meta name="author" content="NetScanner Pro">
     <meta name="robots" content="index, follow">
 
     <!-- Open Graph / Social Media -->
-    <meta property="og:title" content="NetScanner Pro - Network Reconnaissance">
-    <meta property="og:description" content="Powerful web-based network scanning tool with real-time visualization.">
+    <meta property="og:title" content="NetScanner Pro - Real Network Scanner">
+    <meta property="og:description" content="nmap-powered web network scanner with real-time visualization.">
     <meta property="og:type" content="website">
 
-    <!-- Favicon placeholder -->
+    <!-- Favicon -->
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
 
-    <title>NetScanner Pro - Network Reconnaissance</title>
+    <title>NetScanner Pro - Real Network Scanner</title>
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&display=swap" rel="stylesheet">
-    <!-- CDN Scripts: crossorigin required for SRI. Generate integrity hashes before deployment
-         using: curl -s <URL> | openssl dgst -sha384 -binary | openssl base64 -A -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
         crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
@@ -40,8 +38,12 @@
             </div>
             <div class="status-bar">
                 <span class="status-item">
-                    <span class="status-label">Current IP:</span>
-                    <span id="currentIP" class="status-value">192.168.1.1</span>
+                    <span class="status-label">Source IP:</span>
+                    <span id="sourceIP" class="status-value">detecting...</span>
+                </span>
+                <span class="status-item">
+                    <span class="status-label">nmap:</span>
+                    <span id="nmapStatus" class="status-value nmap-ok">checking...</span>
                 </span>
                 <span class="status-item">
                     <span class="status-label">Status:</span>
@@ -61,24 +63,25 @@
                 <h2 class="section-title">⚙️ Scan Configuration</h2>
 
                 <div class="input-group">
-                    <label for="targetIP">Target IP/Range:</label>
-                    <input type="text" id="targetIP" placeholder="192.168.1.1 or 192.168.1.0/24" value="192.168.1.0/24"
-                        aria-describedby="targetHelp" autocomplete="off" maxlength="80">
-                    <small id="targetHelp" class="input-help">Enter single IP, CIDR range, or IP range</small>
+                    <label for="targetIP">Target IP/Range/Hostname:</label>
+                    <input type="text" id="targetIP" placeholder="192.168.1.1 or 10.0.0.0/24 or example.com"
+                        value="192.168.1.0/24"
+                        aria-describedby="targetHelp" autocomplete="off" maxlength="253">
+                    <small id="targetHelp" class="input-help">IP, CIDR range, IP range, or hostname</small>
                 </div>
 
                 <div class="input-group">
                     <label for="scanType">Scan Type:</label>
                     <select id="scanType">
-                        <option value="ping">Ping Scan (Host Discovery)</option>
-                        <option value="quick">Quick Scan (Top 100 Ports)</option>
-                        <option value="full">Full Scan (All 65535 Ports)</option>
-                        <option value="stealth">Stealth Scan (SYN)</option>
-                        <option value="service">Service Detection</option>
-                        <option value="os">OS Detection</option>
-                        <option value="udp">UDP Scan</option>
-                        <option value="vuln">Vulnerability Scan</option>
-                        <option value="aggressive">Aggressive Scan (All-in-One)</option>
+                        <option value="ping">Ping Scan (-sn) Host Discovery</option>
+                        <option value="quick">Quick Scan (-F) Top Ports</option>
+                        <option value="full">Full Scan (-p-) All 65535 Ports</option>
+                        <option value="stealth">Stealth Scan (-sS) SYN *root</option>
+                        <option value="service">Service Detection (-sV)</option>
+                        <option value="os">OS Detection (-O) *root</option>
+                        <option value="udp">UDP Scan (-sU) *root</option>
+                        <option value="vuln">Vulnerability Scan (--script vuln)</option>
+                        <option value="aggressive">Aggressive Scan (-A) All-in-One *root</option>
                     </select>
                 </div>
 
@@ -90,9 +93,9 @@
                 <div class="input-group">
                     <label for="scanTiming">Scan Timing:</label>
                     <select id="scanTiming">
-                        <option value="1">T1 - Paranoid (Slowest)</option>
-                        <option value="2">T2 - Polite</option>
-                        <option value="3" selected>T3 - Normal</option>
+                        <option value="1">T1 - Sneaky (IDS Evasion)</option>
+                        <option value="2">T2 - Polite (Low Bandwidth)</option>
+                        <option value="3" selected>T3 - Normal (Default)</option>
                         <option value="4">T4 - Aggressive (Fast)</option>
                         <option value="5">T5 - Insane (Fastest)</option>
                     </select>
@@ -100,20 +103,10 @@
 
                 <div class="checkbox-group">
                     <label class="checkbox-label">
-                        <input type="checkbox" id="autoRotateIP">
-                        <span>Auto-Rotate IP Address</span>
+                        <input type="checkbox" id="skipDiscovery">
+                        <span>Skip Host Discovery (-Pn)</span>
                     </label>
-                    <div class="ip-rotation-settings">
-                        <label for="rotationInterval">Rotate Every:</label>
-                        <select id="rotationInterval">
-                            <option value="0">Every Request</option>
-                            <option value="1">1 second</option>
-                            <option value="3" selected>3 seconds</option>
-                            <option value="5">5 seconds</option>
-                            <option value="10">10 seconds</option>
-                            <option value="30">30 seconds</option>
-                        </select>
-                    </div>
+                    <small class="input-help">Treat all hosts as online. Use when hosts block ping probes.</small>
                 </div>
 
                 <div class="button-group">
@@ -131,7 +124,7 @@
                 <!-- Loading Indicator -->
                 <div id="loadingIndicator" class="loading-indicator" style="display: none;" aria-live="polite">
                     <div class="spinner"></div>
-                    <span>Scanning network...</span>
+                    <span>Scanning network (real nmap scan in progress)...</span>
                 </div>
 
                 <!-- Export Options -->
@@ -154,7 +147,7 @@
             <!-- Terminal Output -->
             <section class="terminal-section">
                 <div class="terminal-header">
-                    <span class="terminal-title">📟 Scan Output</span>
+                    <span class="terminal-title">📟 nmap Output</span>
                     <div class="terminal-controls">
                         <span class="terminal-dot red"></span>
                         <span class="terminal-dot yellow"></span>
@@ -164,11 +157,7 @@
                 <div id="terminal" class="terminal">
                     <div class="terminal-line">
                         <span class="prompt">[NetScanner]$</span>
-                        <span class="text-green">System initialized. Ready for reconnaissance...</span>
-                    </div>
-                    <div class="terminal-line">
-                        <span class="prompt">[INFO]</span>
-                        <span class="text-cyan">Configure scan parameters and click "Start Scan"</span>
+                        <span class="text-green">System initialized. Connecting to backend...</span>
                     </div>
                 </div>
             </section>
@@ -186,27 +175,18 @@
                 </div>
 
                 <div class="viz-content">
-                    <!-- Network Map -->
                     <div id="networkTab" class="viz-panel active">
                         <canvas id="networkMap"></canvas>
                     </div>
-
-                    <!-- Port Distribution -->
                     <div id="portsTab" class="viz-panel">
                         <canvas id="portChart"></canvas>
                     </div>
-
-                    <!-- Service Analysis -->
                     <div id="servicesTab" class="viz-panel">
                         <canvas id="serviceChart"></canvas>
                     </div>
-
-                    <!-- OS Distribution -->
                     <div id="osTab" class="viz-panel">
                         <canvas id="osChart"></canvas>
                     </div>
-
-                    <!-- Vulnerability Chart -->
                     <div id="vulnsTab" class="viz-panel">
                         <canvas id="vulnChart"></canvas>
                     </div>
@@ -219,7 +199,7 @@
                 <div id="resultsContainer" class="results-container">
                     <div class="no-results">
                         <span class="icon">🔍</span>
-                        <p>No scan results yet. Start a scan to see data.</p>
+                        <p>No scan results yet. Start a scan to see real nmap data.</p>
                     </div>
                 </div>
             </section>
@@ -227,7 +207,7 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <p>⚠️ <strong>EDUCATIONAL USE ONLY</strong> - Only scan networks you own or have permission to test</p>
+            <p>⚠️ <strong>AUTHORIZED USE ONLY</strong> - Only scan networks you own or have explicit written permission to test</p>
         </footer>
     </div>
 
