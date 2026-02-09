@@ -721,9 +721,92 @@ body::before {
     font-weight: bold;
 }
 
+.port-state-closed {
+    color: #ff5555;
+    font-weight: bold;
+}
+
 .port-state-filtered {
     color: #ffaa00;
     font-weight: bold;
+}
+
+.port-reason {
+    color: #888;
+    font-size: 0.8rem;
+}
+
+/* nmap Status Indicators */
+.nmap-ok {
+    color: #00ff41;
+    border-color: #00ff41;
+}
+
+.nmap-warn {
+    color: #ffaa00;
+    border-color: #ffaa00;
+}
+
+.nmap-error {
+    color: #ff5555;
+    border-color: #ff5555;
+}
+
+/* OS Accuracy & Vendor */
+.os-accuracy {
+    color: #888;
+    font-size: 0.85rem;
+}
+
+.vendor-name {
+    color: #888;
+    font-size: 0.85rem;
+}
+
+.os-alternatives {
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    font-size: 0.8rem;
+    color: #888;
+}
+
+.os-alt-item {
+    color: #00ffff;
+}
+
+/* Vulnerability Details */
+.vuln-port {
+    color: #00ffff;
+    font-size: 0.8rem;
+}
+
+.vuln-details {
+    width: 100%;
+    margin-top: 4px;
+}
+
+.vuln-details summary {
+    cursor: pointer;
+    color: #888;
+    font-size: 0.8rem;
+}
+
+.vuln-details summary:hover {
+    color: #00ffff;
+}
+
+.vuln-output {
+    margin-top: 6px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid #333;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    color: #aaa;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 200px;
+    overflow-y: auto;
 }
 
 /* Vulnerability Section */

@@ -6,13 +6,13 @@ const targetIPInput = document.getElementById('targetIP');
 const scanTypeSelect = document.getElementById('scanType');
 const portsInput = document.getElementById('ports');
 const scanTimingSelect = document.getElementById('scanTiming');
-const autoRotateIPCheckbox = document.getElementById('autoRotateIP');
-const rotationIntervalSelect = document.getElementById('rotationInterval');
+const skipDiscoveryCheckbox = document.getElementById('skipDiscovery');
 const terminal = document.getElementById('terminal');
 const resultsContainer = document.getElementById('resultsContainer');
-const currentIPSpan = document.getElementById('currentIP');
+const sourceIPSpan = document.getElementById('sourceIP');
 const scanStatusSpan = document.getElementById('scanStatus');
 const hostsFoundSpan = document.getElementById('hostsFound');
+const nmapStatusSpan = document.getElementById('nmapStatus');
 
 // Export Buttons
 const exportJSONBtn = document.getElementById('exportJSON');
@@ -30,7 +30,6 @@ const vulnChartCanvas = document.getElementById('vulnChart');
 // State
 let isScanning = false;
 let scanAbortController = null;
-let ipRotationInterval = null;
 let scanResults = [];
 let networkChart = null;
 let portChart = null;
@@ -52,7 +51,9 @@ function validateIPTarget(target) {
     const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
     const cidrPattern = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
     const rangePattern = /^(\d{1,3}\.){3}\d{1,3}-(\d{1,3}\.){3}\d{1,3}$/;
-    return ipPattern.test(target) || cidrPattern.test(target) || rangePattern.test(target);
+    const hostnamePattern = /^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*$/;
+    return ipPattern.test(target) || cidrPattern.test(target) ||
+           rangePattern.test(target) || hostnamePattern.test(target);
 }
 
 // Show loading state
@@ -66,9 +67,48 @@ function setLoadingState(isLoading) {
 // API Configuration
 const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:5000/api`;
 
-// Initialize
-document.addEventListener('DOMContentLoaded', () => {
+// Initialize - fetch server status
+document.addEventListener('DOMContentLoaded', async () => {
     updateVisualizations();
+    try {
+        const resp = await fetch(`${API_BASE_URL}/health`);
+        if (resp.ok) {
+            const health = await resp.json();
+            // Display source IP
+            if (sourceIPSpan && health.source_ip) {
+                sourceIPSpan.textContent = health.source_ip;
+            }
+            // Display nmap status
+            if (nmapStatusSpan) {
+                if (health.nmap?.available) {
+                    nmapStatusSpan.textContent = `v${health.nmap.version}`;
+                    nmapStatusSpan.className = 'status-value nmap-ok';
+                    if (!health.privileges?.root) {
+                        nmapStatusSpan.textContent += ' (limited)';
+                        nmapStatusSpan.className = 'status-value nmap-warn';
+                    }
+                } else {
+                    nmapStatusSpan.textContent = 'NOT INSTALLED';
+                    nmapStatusSpan.className = 'status-value nmap-error';
+                }
+            }
+            // Log startup info
+            addTerminalLine('INFO',
+                `Connected to backend. nmap ${health.nmap?.available ? 'v' + health.nmap.version : 'NOT FOUND'}` +
+                ` | ${health.privileges?.root ? 'root' : 'unprivileged'}`, 'green');
+            if (!health.nmap?.available) {
+                addTerminalLine('ERROR', 'nmap is not installed. Install: sudo apt install nmap', 'red');
+            } else if (!health.privileges?.root) {
+                addTerminalLine('WARNING', 'Running without root. Some scans limited (stealth, OS, UDP, aggressive).', 'yellow');
+            }
+        }
+    } catch (e) {
+        addTerminalLine('ERROR', 'Cannot connect to backend. Is server.py running?', 'red');
+        if (nmapStatusSpan) {
+            nmapStatusSpan.textContent = 'OFFLINE';
+            nmapStatusSpan.className = 'status-value nmap-error';
+        }
+    }
 });
 
 // Event Listeners
@@ -124,6 +164,7 @@ async function startScan() {
     const scanType = scanTypeSelect.value;
     const ports = portsInput.value.trim();
     const timing = parseInt(scanTimingSelect.value) || 3;
+    const skipDiscovery = skipDiscoveryCheckbox?.checked || false;
 
     if (!target) {
         addTerminalLine('ERROR', 'Target IP/Range is required', 'red');
@@ -132,7 +173,7 @@ async function startScan() {
     }
 
     if (!validateIPTarget(target)) {
-        addTerminalLine('ERROR', 'Invalid target format. Use IP, CIDR, or range format.', 'red');
+        addTerminalLine('ERROR', 'Invalid target format. Use IP, CIDR, range, or hostname.', 'red');
         targetIPInput.focus();
         return;
     }
@@ -151,13 +192,7 @@ async function startScan() {
     scanResults = [];
     resultsContainer.innerHTML = '';
 
-    // Start IP rotation if enabled
-    if (autoRotateIPCheckbox.checked) {
-        startIPRotation();
-    }
-
     addTerminalLine('INFO', `Starting ${scanType.toUpperCase()} scan on ${target}`, 'cyan');
-    addTerminalLine('INFO', `Source IP: ${currentIPSpan.textContent}`, 'cyan');
 
     try {
         const response = await fetch(`${API_BASE_URL}/scan`, {
@@ -167,8 +202,8 @@ async function startScan() {
                 target: target,
                 scanType: scanType,
                 ports: ports,
-                sourceIP: currentIPSpan.textContent,
-                timing: timing
+                timing: timing,
+                skipDiscovery: skipDiscovery
             }),
             signal: scanAbortController.signal
         });
@@ -204,7 +239,6 @@ async function startScan() {
         scanStatusSpan.textContent = 'COMPLETE';
         scanStatusSpan.className = 'status-value status-complete';
         addTerminalLine('SUCCESS', 'Scan completed successfully', 'green');
-        // Final viz update
         updateVisualizations();
 
     } catch (error) {
@@ -233,7 +267,6 @@ function stopScan() {
         scanStatusSpan.textContent = 'STOPPED';
         scanStatusSpan.className = 'status-value status-idle';
     }
-    stopIPRotation();
 }
 
 // Handle Scan Data
@@ -248,7 +281,7 @@ function handleScanData(data) {
     }
 }
 
-// Debounce visualization updates for speed during rapid scanning
+// Debounce visualization updates
 function scheduleVizUpdate() {
     if (!vizUpdatePending) {
         vizUpdatePending = true;
@@ -277,26 +310,42 @@ function displayHostResult(host) {
         </div>
         <div class="host-info">
             ${host.hostname ? `<div class="info-item"><span class="info-label">Hostname</span><span class="info-value">${sanitizeHTML(host.hostname)}</span></div>` : ''}
-            ${host.os ? `<div class="info-item"><span class="info-label">Operating System</span><span class="info-value">${sanitizeHTML(host.os)}</span></div>` : ''}
-            ${host.mac ? `<div class="info-item"><span class="info-label">MAC Address</span><span class="info-value">${sanitizeHTML(host.mac)}</span></div>` : ''}
-            <div class="info-item"><span class="info-label">Response Time</span><span class="info-value">${sanitizeHTML(host.latency) || 'N/A'}</span></div>
+            ${host.os ? `<div class="info-item"><span class="info-label">OS</span><span class="info-value">${sanitizeHTML(host.os)}${host.os_accuracy ? ` <span class="os-accuracy">(${sanitizeHTML(host.os_accuracy)}% confidence)</span>` : ''}</span></div>` : ''}
+            ${host.mac ? `<div class="info-item"><span class="info-label">MAC Address</span><span class="info-value">${sanitizeHTML(host.mac)}${host.vendor ? ` <span class="vendor-name">(${sanitizeHTML(host.vendor)})</span>` : ''}</span></div>` : ''}
+            ${host.status_reason ? `<div class="info-item"><span class="info-label">Reason</span><span class="info-value">${sanitizeHTML(host.status_reason)}</span></div>` : ''}
         </div>`;
+
+    // OS alternatives
+    if (host.os_alternatives && host.os_alternatives.length > 0) {
+        html += `<div class="os-alternatives">
+            <span class="info-label">OS Alternatives:</span>
+            ${host.os_alternatives.map(alt =>
+                `<span class="os-alt-item">${sanitizeHTML(alt.name)} (${sanitizeHTML(alt.accuracy)}%)</span>`
+            ).join(', ')}
+        </div>`;
+    }
 
     // Ports table
     if (host.ports && host.ports.length > 0) {
         html += `
         <table class="ports-table">
             <thead><tr>
-                <th>Port</th><th>State</th><th>Protocol</th><th>Service</th><th>Version</th>
+                <th>Port</th><th>State</th><th>Protocol</th><th>Service</th><th>Version</th><th>Reason</th>
             </tr></thead>
             <tbody>
-                ${host.ports.map(port => `<tr>
-                    <td>${sanitizeHTML(String(port.port))}</td>
-                    <td><span class="port-state-${port.state === 'open' ? 'open' : 'filtered'}">${sanitizeHTML(port.state)}</span></td>
-                    <td>${sanitizeHTML(port.protocol || 'tcp')}</td>
-                    <td>${sanitizeHTML(port.service) || 'unknown'}</td>
-                    <td>${sanitizeHTML(port.version) || 'N/A'}</td>
-                </tr>`).join('')}
+                ${host.ports.map(port => {
+                    const validStates = ['open', 'filtered', 'closed', 'open|filtered', 'closed|filtered'];
+                    const stateClass = port.state === 'open' ? 'open' :
+                                       port.state === 'closed' ? 'closed' : 'filtered';
+                    return `<tr>
+                        <td>${sanitizeHTML(String(port.port))}</td>
+                        <td><span class="port-state-${stateClass}">${sanitizeHTML(port.state)}</span></td>
+                        <td>${sanitizeHTML(port.protocol || 'tcp')}</td>
+                        <td>${sanitizeHTML(port.service) || 'unknown'}</td>
+                        <td>${sanitizeHTML(port.version) || '-'}</td>
+                        <td class="port-reason">${sanitizeHTML(port.reason) || '-'}</td>
+                    </tr>`;
+                }).join('')}
             </tbody>
         </table>`;
     }
@@ -312,7 +361,8 @@ function displayHostResult(host) {
                     <span class="vuln-severity ${safeSev}">${sanitizeHTML(v.severity?.toUpperCase())}</span>
                     <span class="vuln-cve">${sanitizeHTML(v.cve)}</span>
                     <span class="vuln-name">${sanitizeHTML(v.name)}</span>
-                    <span class="vuln-desc">${sanitizeHTML(v.description)}</span>
+                    ${v.port ? `<span class="vuln-port">Port ${sanitizeHTML(String(v.port))}</span>` : ''}
+                    ${v.description ? `<details class="vuln-details"><summary>Details</summary><pre class="vuln-output">${sanitizeHTML(v.description)}</pre></details>` : ''}
                 </div>`;
             }).join('')}
         </div>`;
@@ -398,44 +448,6 @@ function updateStatistics() {
     hostsFoundSpan.textContent = hostsUp;
 }
 
-// IP Rotation Functions
-function startIPRotation() {
-    const intervalSeconds = parseInt(rotationIntervalSelect.value);
-    rotateIP();
-    if (intervalSeconds === 0) {
-        addTerminalLine('INFO', 'IP rotation: Every request (random IP per scan)', 'cyan');
-        return;
-    }
-    ipRotationInterval = setInterval(() => rotateIP(), intervalSeconds * 1000);
-    addTerminalLine('INFO', `IP rotation enabled (every ${intervalSeconds}s)`, 'cyan');
-}
-
-function stopIPRotation() {
-    if (ipRotationInterval) {
-        clearInterval(ipRotationInterval);
-        ipRotationInterval = null;
-    }
-}
-
-function rotateIP() {
-    const newIP = generateRandomIP();
-    currentIPSpan.textContent = newIP;
-    addTerminalLine('INFO', `IP rotated to ${newIP}`, 'yellow');
-}
-
-function generateRandomIP() {
-    const classes = [
-        () => `${randomInt(1, 126)}.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 254)}`,
-        () => `${randomInt(128, 191)}.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 254)}`,
-        () => `${randomInt(192, 223)}.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 254)}`
-    ];
-    return classes[randomInt(0, 2)]();
-}
-
-function randomInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
 
 // ── Visualization Functions ─────────────────────────────────────────────
 
@@ -459,7 +471,7 @@ function updateVisualizations() {
     updateVulnChart();
 }
 
-// Network Map - Bubble chart: IPs by open ports and latency
+// Network Map - Bubble chart
 function updateNetworkMap() {
     const ctx = networkMapCanvas.getContext('2d');
     if (networkChart) networkChart.destroy();
@@ -467,7 +479,6 @@ function updateNetworkMap() {
     const hostsUp = scanResults.filter(h => h.status === 'up');
     const hostsDown = scanResults.filter(h => h.status === 'down');
 
-    // If no data or only basic stats, show summary doughnut
     if (hostsUp.length === 0 && hostsDown.length === 0) {
         networkChart = new Chart(ctx, {
             type: 'doughnut',
@@ -486,11 +497,10 @@ function updateNetworkMap() {
         return;
     }
 
-    // Build bubble data: x = index, y = port count, r = latency
     const upData = hostsUp.map((h, i) => ({
         x: i,
         y: h.ports?.length || 0,
-        r: Math.max(5, Math.min(25, parseInt(h.latency) || 5)),
+        r: Math.max(5, Math.min(25, parseInt(h.latency) || 8)),
         label: h.ip
     }));
     const downData = hostsDown.map((h, i) => ({
@@ -536,12 +546,12 @@ function updateNetworkMap() {
             },
             plugins: {
                 legend: { labels: { color: '#00ff41', font: chartFont } },
-                title: { display: true, text: 'Network Topology (bubble size = latency)', color: '#00ff41', font: { ...chartFont, size: 16 } },
+                title: { display: true, text: 'Network Topology (bubble size = open ports)', color: '#00ff41', font: { ...chartFont, size: 16 } },
                 tooltip: {
                     callbacks: {
                         label: (ctx) => {
                             const d = ctx.raw;
-                            return `${d.label}: ${d.y} ports, ${d.r}ms latency`;
+                            return `${d.label}: ${d.y} open ports`;
                         }
                     }
                 }
@@ -559,8 +569,10 @@ function updatePortChart() {
     scanResults.forEach(host => {
         if (host.ports) {
             host.ports.forEach(port => {
-                const key = `${port.port}/${port.protocol || 'tcp'}`;
-                portCounts[key] = (portCounts[key] || 0) + 1;
+                if (port.state === 'open') {
+                    const key = `${port.port}/${port.protocol || 'tcp'}`;
+                    portCounts[key] = (portCounts[key] || 0) + 1;
+                }
             });
         }
     });
@@ -602,8 +614,10 @@ function updateServiceChart() {
     scanResults.forEach(host => {
         if (host.ports) {
             host.ports.forEach(port => {
-                const service = port.service || 'unknown';
-                serviceCounts[service] = (serviceCounts[service] || 0) + 1;
+                if (port.state === 'open') {
+                    const service = port.service || 'unknown';
+                    serviceCounts[service] = (serviceCounts[service] || 0) + 1;
+                }
             });
         }
     });
@@ -764,14 +778,15 @@ function exportCSV() {
         return;
     }
 
-    let csv = 'IP Address,Status,Hostname,OS,Open Ports,Services,Vulnerabilities\n';
+    let csv = 'IP Address,Status,Hostname,OS,MAC,Vendor,Open Ports,Services,Versions,Vulnerabilities\n';
 
     scanResults.forEach(host => {
         const ports = host.ports ? host.ports.map(p => `${p.port}/${p.protocol || 'tcp'}`).join(';') : '';
         const services = host.ports ? host.ports.map(p => sanitizeCSVValue(p.service)).join(';') : '';
+        const versions = host.ports ? host.ports.map(p => sanitizeCSVValue(p.version || '')).join(';') : '';
         const vulns = host.vulnerabilities ? host.vulnerabilities.map(v => sanitizeCSVValue(v.cve)).join(';') : '';
 
-        csv += `${sanitizeCSVValue(host.ip)},${sanitizeCSVValue(host.status)},${sanitizeCSVValue(host.hostname || 'N/A')},${sanitizeCSVValue(host.os || 'N/A')},"${sanitizeCSVValue(ports)}","${sanitizeCSVValue(services)}","${sanitizeCSVValue(vulns)}"\n`;
+        csv += `${sanitizeCSVValue(host.ip)},${sanitizeCSVValue(host.status)},${sanitizeCSVValue(host.hostname || 'N/A')},${sanitizeCSVValue(host.os || 'N/A')},${sanitizeCSVValue(host.mac || 'N/A')},${sanitizeCSVValue(host.vendor || 'N/A')},"${sanitizeCSVValue(ports)}","${sanitizeCSVValue(services)}","${sanitizeCSVValue(versions)}","${sanitizeCSVValue(vulns)}"\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -814,12 +829,14 @@ async function exportPDF() {
     pdf.setFontSize(10);
     const hostsUp = scanResults.filter(h => h.status === 'up').length;
     const totalPorts = scanResults.reduce((sum, h) => sum + (h.ports?.length || 0), 0);
+    const openPorts = scanResults.reduce((sum, h) =>
+        sum + (h.ports?.filter(p => p.state === 'open').length || 0), 0);
     const totalVulns = scanResults.reduce((sum, h) => sum + (h.vulnerabilities?.length || 0), 0);
 
     pdf.text(`Total Hosts Scanned: ${scanResults.length}`, 20, 70);
     pdf.text(`Hosts Up: ${hostsUp}`, 20, 76);
     pdf.text(`Hosts Down: ${scanResults.length - hostsUp}`, 20, 82);
-    pdf.text(`Total Open Ports: ${totalPorts}`, 20, 88);
+    pdf.text(`Open Ports Found: ${openPorts} (${totalPorts} total)`, 20, 88);
     if (totalVulns > 0) {
         pdf.setTextColor(200, 0, 0);
         pdf.text(`Vulnerabilities Found: ${totalVulns}`, 20, 94);
@@ -844,10 +861,15 @@ async function exportPDF() {
             pdf.text(`   Hostname: ${host.hostname}`, 25, yPos); yPos += 5;
         }
         if (host.os) {
-            pdf.text(`   OS: ${host.os}`, 25, yPos); yPos += 5;
+            pdf.text(`   OS: ${host.os}${host.os_accuracy ? ' (' + host.os_accuracy + '%)' : ''}`, 25, yPos); yPos += 5;
+        }
+        if (host.mac) {
+            pdf.text(`   MAC: ${host.mac}${host.vendor ? ' (' + host.vendor + ')' : ''}`, 25, yPos); yPos += 5;
         }
         if (host.ports && host.ports.length > 0) {
-            const portList = host.ports.map(p => `${p.port}/${p.protocol || 'tcp'}(${p.service})`).join(', ');
+            const portList = host.ports.map(p =>
+                `${p.port}/${p.protocol}(${p.service}${p.state !== 'open' ? ':' + p.state : ''})`
+            ).join(', ');
             const lines = pdf.splitTextToSize(`   Ports: ${portList}`, 170);
             lines.forEach(line => {
                 if (yPos > 270) { pdf.addPage(); yPos = 20; }
@@ -858,7 +880,7 @@ async function exportPDF() {
             pdf.setTextColor(200, 0, 0);
             host.vulnerabilities.forEach(v => {
                 if (yPos > 270) { pdf.addPage(); yPos = 20; }
-                pdf.text(`   [${v.severity.toUpperCase()}] ${v.cve} - ${v.name}`, 25, yPos); yPos += 5;
+                pdf.text(`   [${(v.severity || '?').toUpperCase()}] ${v.cve} - ${v.name || ''}`, 25, yPos); yPos += 5;
             });
             pdf.setTextColor(100, 100, 100);
         }
