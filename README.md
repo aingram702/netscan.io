@@ -25,6 +25,8 @@ A web-based network scanner that wraps **real nmap** with a modern UI, real-time
 > **LEGAL NOTICE**: Only scan networks you own or have explicit written authorization to test. Unauthorized scanning is illegal under the CFAA and similar laws worldwide.
 
 ---
+![Screenshot1 of the app](./images/1.png)
+![Screenshot2 of the app](./images/2.png)
 
 ## Table of Contents
 
@@ -40,6 +42,22 @@ A web-based network scanner that wraps **real nmap** with a modern UI, real-time
 - [Troubleshooting](#-troubleshooting)
 - [Contributing](#-contributing)
 - [License](#-license)
+
+---
+
+
+## Features
+
+| Category | Highlights |
+|----------|-----------|
+| **Scanning** | 9 scan types including vulnerability detection, UDP scanning, and aggressive all-in-one mode |
+| **Speed** | 5 timing profiles (T1-T5) inspired by nmap, from stealthy to maximum throughput |
+| **Targeting** | Single IPs, CIDR notation (`/8` to `/32`), IP ranges, and custom port specifications |
+| **Visualization** | 5 interactive Chart.js tabs - network topology, port distribution, services, OS fingerprints, vulnerabilities |
+| **Vulnerability DB** | 25+ real-world CVEs including Log4Shell, BlueKeep, EternalBlue, Spring4Shell, ProxyLogon |
+| **Export** | JSON, CSV (with injection protection), and professional PDF reports with embedded charts |
+| **Real-time** | NDJSON streaming delivers results as each host is scanned - no waiting for completion |
+| **Security** | CSP headers, rate limiting, input sanitization, path traversal prevention, XSS protection |
 
 ---
 
