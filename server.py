@@ -1,18 +1,31 @@
-from flask import Flask, request, jsonify, Response, send_file, send_from_directory
+from flask import Flask, request, jsonify, Response, send_file, send_from_directory, abort
 from flask_cors import CORS
 import json
 import time
 import random
 import os
+import re
 from datetime import datetime
 from io import BytesIO
 import csv
+from functools import wraps
+from collections import defaultdict
 
 # Get the directory where server.py is located
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(__name__, static_folder=BASE_DIR, static_url_path='')
-CORS(app)
+CORS(app, origins=[
+    'http://localhost:5000',
+    'http://127.0.0.1:5000',
+    f'http://{os.environ.get("ALLOWED_HOST", "localhost")}:5000'
+])
+
+# Maximum export payload size (1MB)
+MAX_EXPORT_SIZE = 1 * 1024 * 1024
+
+# Allowed static file extensions to prevent path traversal to sensitive files
+ALLOWED_STATIC_EXTENSIONS = {'.html', '.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'}
 
 EXPORTS_DIR = os.path.join(BASE_DIR, 'exports')
 os.makedirs(EXPORTS_DIR, exist_ok=True)
@@ -25,6 +38,12 @@ def serve_index():
 
 @app.route('/<path:filename>')
 def serve_static(filename):
+    # Prevent path traversal and restrict to allowed file types
+    if '..' in filename or filename.startswith('/'):
+        abort(403)
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_STATIC_EXTENSIONS:
+        abort(403)
     return send_from_directory(BASE_DIR, filename)
 
 # Simulated data
@@ -150,8 +169,6 @@ def simulate_scan(target, scan_type, ports=None, source_ip=None):
 
 
 # Security: Input validation
-import re
-
 def validate_target(target):
     """Validate target IP/range format"""
     # Match single IP
@@ -169,7 +186,11 @@ def validate_target(target):
         octets = ip.split('.')
         return all(0 <= int(o) <= 255 for o in octets) and 0 <= int(prefix) <= 32
     elif re.match(range_pattern, target):
-        return True
+        start_ip, end_ip = target.split('-')
+        start_octets = start_ip.split('.')
+        end_octets = end_ip.split('.')
+        return (all(0 <= int(o) <= 255 for o in start_octets) and
+                all(0 <= int(o) <= 255 for o in end_octets))
     return False
 
 
@@ -182,25 +203,30 @@ def sanitize_input(text):
 
 
 # Rate limiting (simple in-memory implementation)
-from functools import wraps
-from collections import defaultdict
-
 request_counts = defaultdict(list)
 RATE_LIMIT = 10  # requests per minute
 RATE_WINDOW = 60  # seconds
+
+MAX_TRACKED_IPS = 10000  # Prevent unbounded memory growth
 
 def rate_limit(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         client_ip = request.remote_addr
         now = time.time()
-        
-        # Clean old requests
+
+        # Clean old requests for this IP
         request_counts[client_ip] = [t for t in request_counts[client_ip] if now - t < RATE_WINDOW]
-        
+
+        # Prune stale IPs to prevent memory leak
+        if len(request_counts) > MAX_TRACKED_IPS:
+            stale_ips = [ip for ip, times in request_counts.items() if not times]
+            for ip in stale_ips:
+                del request_counts[ip]
+
         if len(request_counts[client_ip]) >= RATE_LIMIT:
             return jsonify({'error': 'Rate limit exceeded. Try again later.'}), 429
-        
+
         request_counts[client_ip].append(now)
         return f(*args, **kwargs)
     return decorated_function
@@ -212,7 +238,17 @@ def add_security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['X-XSS-Protection'] = '1; mode=block'
-    response.headers['Content-Security-Policy'] = "default-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com https://fonts.gstatic.com; img-src 'self' data:;"
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self'"
+    )
     return response
 
 
@@ -274,25 +310,32 @@ def get_stats():
 @rate_limit
 def export_json():
     """Export scan results as JSON"""
+    if request.content_length and request.content_length > MAX_EXPORT_SIZE:
+        return jsonify({'error': 'Payload too large'}), 413
+
     data = request.json
-    
+
     if not data or 'results' not in data:
         return jsonify({'error': 'No results to export'}), 400
-    
+
+    results = data.get('results', [])
+    if len(results) > 1000:
+        return jsonify({'error': 'Too many results (max 1000)'}), 400
+
     export_data = {
         'timestamp': datetime.now().isoformat(),
         'target': sanitize_input(data.get('target', 'N/A')),
         'scanType': sanitize_input(data.get('scanType', 'N/A')),
-        'totalHosts': len(data.get('results', [])),
-        'results': data.get('results', [])
+        'totalHosts': len(results),
+        'results': results
     }
-    
+
     filename = f"netscan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     filepath = os.path.join(EXPORTS_DIR, filename)
-    
+
     with open(filepath, 'w') as f:
         json.dump(export_data, f, indent=2)
-    
+
     return jsonify({
         'success': True,
         'filename': filename,
@@ -304,8 +347,11 @@ def export_json():
 @rate_limit
 def export_csv():
     """Export scan results as CSV"""
+    if request.content_length and request.content_length > MAX_EXPORT_SIZE:
+        return jsonify({'error': 'Payload too large'}), 413
+
     data = request.json
-    
+
     if not data or 'results' not in data:
         return jsonify({'error': 'No results to export'}), 400
     
@@ -343,19 +389,22 @@ def export_csv():
 @rate_limit
 def export_pdf():
     """Export scan results as PDF - Note: Full PDF generation requires frontend jsPDF"""
+    if request.content_length and request.content_length > MAX_EXPORT_SIZE:
+        return jsonify({'error': 'Payload too large'}), 413
+
     data = request.json
-    
+
     if not data or 'results' not in data:
         return jsonify({'error': 'No results to export'}), 400
-    
+
     # For PDF, we return structured data that the frontend can use with jsPDF
     return jsonify({
         'success': True,
         'message': 'PDF generation should be handled client-side with jsPDF',
         'data': {
             'timestamp': datetime.now().isoformat(),
-            'target': data.get('target', 'N/A'),
-            'scanType': data.get('scanType', 'N/A'),
+            'target': sanitize_input(data.get('target', 'N/A')),
+            'scanType': sanitize_input(data.get('scanType', 'N/A')),
             'results': data.get('results', [])
         }
     })
