@@ -49,8 +49,8 @@ def check_nmap():
         nm = nmap.PortScanner()
         version = nm.nmap_version()
         return True, f'{version[0]}.{version[1]}', 'available'
-    except Exception as e:
-        return False, None, str(e)
+    except Exception:
+        return False, None, 'nmap initialization failed'
 
 
 NMAP_AVAILABLE, NMAP_VERSION, NMAP_STATUS = check_nmap()
@@ -76,14 +76,16 @@ VALID_SCAN_TYPES = list(SCAN_ARGUMENTS.keys())
 
 def get_local_ip():
     """Get the primary local IP address."""
+    s = None
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8', 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        return s.getsockname()[0]
     except Exception:
         return '127.0.0.1'
+    finally:
+        if s:
+            s.close()
 
 
 # ── Static File Serving ───────────────────────────────────────────────────
@@ -95,12 +97,14 @@ def serve_index():
 
 @app.route('/<path:filename>')
 def serve_static(filename):
-    if '..' in filename or filename.startswith('/'):
+    # Normalize and validate path to prevent traversal
+    normalized = os.path.normpath(filename)
+    if '..' in normalized or normalized.startswith('/') or normalized.startswith('\\'):
         abort(403)
-    ext = os.path.splitext(filename)[1].lower()
+    ext = os.path.splitext(normalized)[1].lower()
     if ext not in ALLOWED_STATIC_EXTENSIONS:
         abort(403)
-    return send_from_directory(BASE_DIR, filename)
+    return send_from_directory(BASE_DIR, normalized)
 
 
 # ── Security ──────────────────────────────────────────────────────────────
@@ -142,7 +146,8 @@ def validate_target(target):
 
 def convert_target_for_nmap(target):
     """Convert IP range format to nmap-compatible format."""
-    if '-' not in target or '/' in target:
+    # Only convert if it looks like an IP range (not a hostname with hyphens)
+    if '/' in target or not re.match(r'^(\d{1,3}\.){3}\d{1,3}-', target):
         return target
 
     parts = target.split('-', 1)
@@ -199,7 +204,7 @@ def rate_limit(f):
 def add_security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['X-XSS-Protection'] = '0'
     response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
@@ -416,7 +421,8 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
                 'color': 'yellow'
             }) + '\n'
         elif scan_type == 'os':
-            scan_args = scan_args.replace('-O ', '')
+            # Remove -O flag (handles both mid-string and end-of-string)
+            scan_args = re.sub(r'-O\b\s*', '', scan_args)
             yield json.dumps({
                 'type': 'log', 'level': 'WARNING',
                 'message': 'OS detection requires root. Running service detection only.',
@@ -430,7 +436,8 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
             }) + '\n'
             return
         elif scan_type == 'aggressive':
-            scan_args = scan_args.replace('-A', '-sV -sC --traceroute')
+            # Replace -A flag precisely (word boundary prevents partial matches)
+            scan_args = re.sub(r'-A\b', '-sV -sC --traceroute', scan_args)
             yield json.dumps({
                 'type': 'log', 'level': 'WARNING',
                 'message': 'Aggressive scan limited without root (no OS detection, no SYN scan).',
@@ -449,8 +456,13 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
         'color': 'cyan'
     }) + '\n'
 
+    scan_start_time = time.time()
+
     try:
-        is_range = '/' in target or '-' in target
+        is_range = bool(
+            re.match(r'^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$', target) or
+            re.match(r'^(\d{1,3}\.){3}\d{1,3}-', target)
+        )
 
         if is_range and scan_type != 'ping' and not skip_discovery:
             # Phase 1: Host discovery via ping sweep
@@ -527,7 +539,7 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
                         'color': 'red'
                     }) + '\n'
 
-            elapsed = nm.scanstats().get('elapsed', '?')
+            elapsed = round(time.time() - scan_start_time, 1)
             summary = f'Scan complete. {len(live_hosts)} host(s) scanned.'
             if vuln_count > 0:
                 summary += f' {vuln_count} vulnerabilities found!'
@@ -571,7 +583,7 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
                     'color': 'yellow'
                 }) + '\n'
 
-            elapsed = nm.scanstats().get('elapsed', '?')
+            elapsed = round(time.time() - scan_start_time, 1)
             summary = f'Scan complete. {len(hosts)} host(s) scanned.'
             if vuln_count > 0:
                 summary += f' {vuln_count} vulnerabilities found!'
@@ -610,7 +622,8 @@ def cleanup_old_exports():
     """Remove oldest export files if over the limit."""
     try:
         files = sorted(
-            [os.path.join(EXPORTS_DIR, f) for f in os.listdir(EXPORTS_DIR)],
+            [os.path.join(EXPORTS_DIR, f) for f in os.listdir(EXPORTS_DIR)
+             if f.endswith('.json')],
             key=os.path.getmtime
         )
         while len(files) > MAX_EXPORT_FILES:
@@ -669,9 +682,25 @@ def scan():
             'error': f'Invalid scan type. Must be one of: {", ".join(VALID_SCAN_TYPES)}'
         }), 400
 
-    # Validate custom ports format
-    if ports and not re.match(r'^[\d,\-\s]+$', ports):
-        return jsonify({'error': 'Invalid port format. Use: 22,80,443 or 1-1000'}), 400
+    # Validate custom ports format (no spaces - prevents nmap argument injection)
+    if ports:
+        ports = ports.replace(' ', '')
+        if not re.match(r'^[\d,\-]+$', ports):
+            return jsonify({'error': 'Invalid port format. Use: 22,80,443 or 1-1000'}), 400
+        # Validate individual port numbers are in range
+        for part in ports.split(','):
+            if not part:
+                continue
+            try:
+                if '-' in part:
+                    start, end = part.split('-', 1)
+                    if not (1 <= int(start) <= 65535 and 1 <= int(end) <= 65535):
+                        return jsonify({'error': 'Port numbers must be between 1 and 65535'}), 400
+                else:
+                    if not (1 <= int(part) <= 65535):
+                        return jsonify({'error': 'Port numbers must be between 1 and 65535'}), 400
+            except ValueError:
+                return jsonify({'error': 'Invalid port format. Use: 22,80,443 or 1-1000'}), 400
 
     def generate():
         for result in nmap_scan(target, scan_type, ports if ports else None,
@@ -702,13 +731,15 @@ def export_json():
     results = data.get('results', [])
     if not isinstance(results, list) or len(results) > 1000:
         return jsonify({'error': 'Invalid or too many results (max 1000)'}), 400
+    # Validate each result is a dict with expected fields
+    validated_results = [r for r in results if isinstance(r, dict) and 'ip' in r]
 
     export_data = {
         'timestamp': datetime.now().isoformat(),
         'target': sanitize_input(data.get('target', 'N/A')),
         'scanType': sanitize_input(data.get('scanType', 'N/A')),
-        'totalHosts': len(results),
-        'results': results
+        'totalHosts': len(validated_results),
+        'results': validated_results
     }
 
     cleanup_old_exports()
@@ -729,6 +760,10 @@ def export_csv():
     if not data or 'results' not in data:
         return jsonify({'error': 'No results to export'}), 400
 
+    results = data.get('results', [])
+    if not isinstance(results, list) or len(results) > 1000:
+        return jsonify({'error': 'Invalid or too many results (max 1000)'}), 400
+
     output = BytesIO()
     writer = csv.writer(output, lineterminator='\n')
     writer.writerow([
@@ -736,19 +771,40 @@ def export_csv():
         'Open Ports', 'Services', 'Versions', 'Vulnerabilities'
     ])
 
+    def sanitize_csv_value(val):
+        """Prevent CSV injection by prefixing formula-trigger characters."""
+        s = str(val) if val is not None else ''
+        if s and s[0] in ('=', '+', '-', '@', '\t', '\r'):
+            return "'" + s
+        return s
+
     for host in data.get('results', []):
+        if not isinstance(host, dict):
+            continue
         ports_str = ';'.join([
             str(p.get('port', '')) + '/' + p.get('protocol', 'tcp')
-            for p in host.get('ports', [])
+            for p in host.get('ports', []) if isinstance(p, dict)
         ])
-        services_str = ';'.join([p.get('service', 'unknown') for p in host.get('ports', [])])
-        versions_str = ';'.join([p.get('version', '') or '' for p in host.get('ports', [])])
-        vulns_str = ';'.join([v.get('cve', '') for v in host.get('vulnerabilities', [])])
+        services_str = ';'.join([
+            sanitize_csv_value(p.get('service', 'unknown'))
+            for p in host.get('ports', []) if isinstance(p, dict)
+        ])
+        versions_str = ';'.join([
+            sanitize_csv_value(p.get('version', '') or '')
+            for p in host.get('ports', []) if isinstance(p, dict)
+        ])
+        vulns_str = ';'.join([
+            sanitize_csv_value(v.get('cve', ''))
+            for v in host.get('vulnerabilities', []) if isinstance(v, dict)
+        ])
 
         writer.writerow([
-            host.get('ip', ''), host.get('status', ''),
-            host.get('hostname', 'N/A'), host.get('os', 'N/A'),
-            host.get('mac', 'N/A'), host.get('vendor', 'N/A'),
+            sanitize_csv_value(host.get('ip', '')),
+            sanitize_csv_value(host.get('status', '')),
+            sanitize_csv_value(host.get('hostname', 'N/A')),
+            sanitize_csv_value(host.get('os', 'N/A')),
+            sanitize_csv_value(host.get('mac', 'N/A')),
+            sanitize_csv_value(host.get('vendor', 'N/A')),
             ports_str, services_str, versions_str, vulns_str
         ])
 
@@ -770,6 +826,10 @@ def export_pdf():
     if not data or 'results' not in data:
         return jsonify({'error': 'No results to export'}), 400
 
+    results = data.get('results', [])
+    if not isinstance(results, list) or len(results) > 1000:
+        return jsonify({'error': 'Invalid or too many results (max 1000)'}), 400
+
     return jsonify({
         'success': True,
         'message': 'PDF generation handled client-side with jsPDF',
@@ -777,7 +837,7 @@ def export_pdf():
             'timestamp': datetime.now().isoformat(),
             'target': sanitize_input(data.get('target', 'N/A')),
             'scanType': sanitize_input(data.get('scanType', 'N/A')),
-            'results': data.get('results', [])
+            'totalHosts': len(results),
         }
     })
 

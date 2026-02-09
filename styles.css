@@ -207,28 +207,6 @@ body::before {
     accent-color: #00ff41;
 }
 
-.ip-rotation-settings {
-    margin-top: 10px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.ip-rotation-settings label {
-    color: #888;
-    font-size: 0.85rem;
-}
-
-.ip-rotation-settings select {
-    flex: 1;
-    padding: 8px;
-    background: rgba(0, 0, 0, 0.5);
-    border: 1px solid #555;
-    border-radius: 5px;
-    color: #00ff41;
-    font-family: 'Fira Code', monospace;
-}
-
 .button-group {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));

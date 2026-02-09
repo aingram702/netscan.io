@@ -64,8 +64,8 @@ function setLoadingState(isLoading) {
     }
 }
 
-// API Configuration
-const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:5000/api`;
+// API Configuration - use the actual port the page was served on
+const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:${window.location.port || '5000'}/api`;
 
 // Initialize - fetch server status
 document.addEventListener('DOMContentLoaded', async () => {
@@ -335,8 +335,9 @@ function displayHostResult(host) {
             <tbody>
                 ${host.ports.map(port => {
                     const validStates = ['open', 'filtered', 'closed', 'open|filtered', 'closed|filtered'];
-                    const stateClass = port.state === 'open' ? 'open' :
-                                       port.state === 'closed' ? 'closed' : 'filtered';
+                    const safeState = validStates.includes(port.state) ? port.state : 'filtered';
+                    const stateClass = safeState === 'open' ? 'open' :
+                                       safeState === 'closed' ? 'closed' : 'filtered';
                     return `<tr>
                         <td>${sanitizeHTML(String(port.port))}</td>
                         <td><span class="port-state-${stateClass}">${sanitizeHTML(port.state)}</span></td>
@@ -408,6 +409,13 @@ function addTerminalLine(level, message, color = 'cyan') {
     line.appendChild(messageSpan);
 
     terminal.appendChild(line);
+
+    // Limit terminal lines to prevent memory leak during long scans
+    const MAX_TERMINAL_LINES = 500;
+    while (terminal.children.length > MAX_TERMINAL_LINES) {
+        terminal.removeChild(terminal.firstChild);
+    }
+
     terminal.scrollTop = terminal.scrollHeight;
 }
 
@@ -500,7 +508,7 @@ function updateNetworkMap() {
     const upData = hostsUp.map((h, i) => ({
         x: i,
         y: h.ports?.length || 0,
-        r: Math.max(5, Math.min(25, parseInt(h.latency) || 8)),
+        r: Math.max(5, Math.min(25, (h.ports?.length || 1) * 3)),
         label: h.ip
     }));
     const downData = hostsDown.map((h, i) => ({
@@ -765,9 +773,14 @@ function exportJSON() {
 }
 
 function sanitizeCSVValue(val) {
-    const str = String(val ?? '');
+    let str = String(val ?? '');
+    // Prevent CSV injection
     if (/^[=+\-@\t\r]/.test(str)) {
-        return "'" + str;
+        str = "'" + str;
+    }
+    // RFC 4180: escape quotes and wrap in quotes if contains comma, quote, or newline
+    if (/[",\n\r]/.test(str)) {
+        str = '"' + str.replace(/"/g, '""') + '"';
     }
     return str;
 }
@@ -782,11 +795,16 @@ function exportCSV() {
 
     scanResults.forEach(host => {
         const ports = host.ports ? host.ports.map(p => `${p.port}/${p.protocol || 'tcp'}`).join(';') : '';
-        const services = host.ports ? host.ports.map(p => sanitizeCSVValue(p.service)).join(';') : '';
-        const versions = host.ports ? host.ports.map(p => sanitizeCSVValue(p.version || '')).join(';') : '';
-        const vulns = host.vulnerabilities ? host.vulnerabilities.map(v => sanitizeCSVValue(v.cve)).join(';') : '';
+        const services = host.ports ? host.ports.map(p => p.service || 'unknown').join(';') : '';
+        const versions = host.ports ? host.ports.map(p => p.version || '').join(';') : '';
+        const vulns = host.vulnerabilities ? host.vulnerabilities.map(v => v.cve || '').join(';') : '';
 
-        csv += `${sanitizeCSVValue(host.ip)},${sanitizeCSVValue(host.status)},${sanitizeCSVValue(host.hostname || 'N/A')},${sanitizeCSVValue(host.os || 'N/A')},${sanitizeCSVValue(host.mac || 'N/A')},${sanitizeCSVValue(host.vendor || 'N/A')},"${sanitizeCSVValue(ports)}","${sanitizeCSVValue(services)}","${sanitizeCSVValue(versions)}","${sanitizeCSVValue(vulns)}"\n`;
+        const fields = [
+            host.ip || '', host.status || '', host.hostname || 'N/A',
+            host.os || 'N/A', host.mac || 'N/A', host.vendor || 'N/A',
+            ports, services, versions, vulns
+        ];
+        csv += fields.map(f => sanitizeCSVValue(f)).join(',') + '\n';
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });
