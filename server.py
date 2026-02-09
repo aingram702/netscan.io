@@ -5,6 +5,8 @@ import time
 import random
 import os
 import re
+import uuid
+import ipaddress
 from datetime import datetime
 from io import BytesIO
 import csv
@@ -21,8 +23,8 @@ CORS(app, origins=[
     f'http://{os.environ.get("ALLOWED_HOST", "localhost")}:5000'
 ])
 
-# Maximum export payload size (1MB)
-MAX_EXPORT_SIZE = 1 * 1024 * 1024
+# Enforce max request body at Flask level (prevents Content-Length header spoofing)
+app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 1MB
 
 # Allowed static file extensions to prevent path traversal to sensitive files
 ALLOWED_STATIC_EXTENSIONS = {'.html', '.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot'}
@@ -64,15 +66,57 @@ HOSTNAMES = [
     'printer.local', 'switch.local', 'gateway.local', 'database.local'
 ]
 
-def generate_random_ip(base='192.168.1'):
-    return f"{base}.{random.randint(1, 254)}"
+def generate_target_ips(target):
+    """Generate the correct list of IPs based on the target specification."""
+    if '/' in target:
+        # CIDR notation - generate IPs within the actual subnet
+        try:
+            network = ipaddress.ip_network(target, strict=False)
+            num_hosts = random.randint(5, 15)
+            # Avoid enumerating huge networks
+            if network.num_addresses > 256:
+                start = int(network.network_address) + 1
+                end = int(network.broadcast_address) - 1
+                if end <= start:
+                    return [str(network.network_address)]
+                ips = set()
+                while len(ips) < num_hosts:
+                    ips.add(str(ipaddress.ip_address(random.randint(start, end))))
+                return list(ips)
+            else:
+                hosts = list(network.hosts())
+                if not hosts:
+                    return [str(network.network_address)]
+                return [str(ip) for ip in random.sample(hosts, min(num_hosts, len(hosts)))]
+        except ValueError:
+            return [target]
+    elif '-' in target:
+        # IP range (e.g., 192.168.1.1-192.168.1.254)
+        try:
+            start_ip, end_ip = target.split('-')
+            start_int = int(ipaddress.ip_address(start_ip.strip()))
+            end_int = int(ipaddress.ip_address(end_ip.strip()))
+            if start_int > end_int:
+                start_int, end_int = end_int, start_int
+            range_size = end_int - start_int + 1
+            num_hosts = random.randint(3, min(10, range_size))
+            ips = set()
+            while len(ips) < num_hosts:
+                ips.add(str(ipaddress.ip_address(random.randint(start_int, end_int))))
+            return list(ips)
+        except ValueError:
+            return [target]
+    else:
+        # Single IP - return exactly this IP
+        return [target]
+
 
 def generate_mac_address():
     return ':'.join([f'{random.randint(0, 255):02x}' for _ in range(6)])
 
 def simulate_scan(target, scan_type, ports=None, source_ip=None):
     """Simulate network scan and yield results"""
-    
+
     # Send initial log
     yield json.dumps({
         'type': 'log',
@@ -80,22 +124,16 @@ def simulate_scan(target, scan_type, ports=None, source_ip=None):
         'message': f'Initiating {scan_type} scan on {target}',
         'color': 'cyan'
     }) + '\n'
-    
+
     time.sleep(0.5)
-    
-    # Parse target range
-    if '/' in target:
-        base_ip = target.split('/')[0].rsplit('.', 1)[0]
-        num_hosts = random.randint(5, 15)
-    else:
-        base_ip = target.rsplit('.', 1)[0]
-        num_hosts = 1
-    
+
+    # Generate correct IPs for the target
+    ips_to_scan = generate_target_ips(target)
+
     # Scan hosts
-    for i in range(num_hosts):
+    for ip in ips_to_scan:
         time.sleep(random.uniform(0.3, 0.8))
-        
-        ip = generate_random_ip(base_ip)
+
         is_up = random.random() > 0.3  # 70% chance host is up
         
         yield json.dumps({
@@ -163,7 +201,7 @@ def simulate_scan(target, scan_type, ports=None, source_ip=None):
     yield json.dumps({
         'type': 'log',
         'level': 'SUCCESS',
-        'message': f'Scan complete. Scanned {num_hosts} hosts.',
+        'message': f'Scan complete. Scanned {len(ips_to_scan)} hosts.',
         'color': 'green'
     }) + '\n'
 
@@ -198,8 +236,13 @@ def sanitize_input(text):
     """Sanitize text input to prevent injection attacks"""
     if text is None:
         return ''
-    # Remove potentially dangerous characters
-    return re.sub(r'[<>"\';`$\\]', '', str(text))
+    text = str(text)
+    # Strip null bytes
+    text = text.replace('\x00', '')
+    # Remove potentially dangerous characters for HTML, shell, and SQL contexts
+    text = re.sub(r'[<>"\';`$\\&()\x00-\x1f]', '', text)
+    # Limit length to prevent abuse
+    return text[:255]
 
 
 # Rate limiting (simple in-memory implementation)
@@ -310,17 +353,14 @@ def get_stats():
 @rate_limit
 def export_json():
     """Export scan results as JSON"""
-    if request.content_length and request.content_length > MAX_EXPORT_SIZE:
-        return jsonify({'error': 'Payload too large'}), 413
-
     data = request.json
 
     if not data or 'results' not in data:
         return jsonify({'error': 'No results to export'}), 400
 
     results = data.get('results', [])
-    if len(results) > 1000:
-        return jsonify({'error': 'Too many results (max 1000)'}), 400
+    if not isinstance(results, list) or len(results) > 1000:
+        return jsonify({'error': 'Invalid or too many results (max 1000)'}), 400
 
     export_data = {
         'timestamp': datetime.now().isoformat(),
@@ -330,7 +370,9 @@ def export_json():
         'results': results
     }
 
-    filename = f"netscan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    # UUID prevents race condition with concurrent requests
+    unique_id = uuid.uuid4().hex[:8]
+    filename = f"netscan_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{unique_id}.json"
     filepath = os.path.join(EXPORTS_DIR, filename)
 
     with open(filepath, 'w') as f:
@@ -347,9 +389,6 @@ def export_json():
 @rate_limit
 def export_csv():
     """Export scan results as CSV"""
-    if request.content_length and request.content_length > MAX_EXPORT_SIZE:
-        return jsonify({'error': 'Payload too large'}), 413
-
     data = request.json
 
     if not data or 'results' not in data:
@@ -389,9 +428,6 @@ def export_csv():
 @rate_limit
 def export_pdf():
     """Export scan results as PDF - Note: Full PDF generation requires frontend jsPDF"""
-    if request.content_length and request.content_length > MAX_EXPORT_SIZE:
-        return jsonify({'error': 'Payload too large'}), 413
-
     data = request.json
 
     if not data or 'results' not in data:
