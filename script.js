@@ -98,9 +98,11 @@ targetIPInput.addEventListener('input', () => {
 });
 
 // Visualization Tab Switching
+const validTabs = ['network', 'ports', 'services'];
 vizTabs.forEach(tab => {
     tab.addEventListener('click', () => {
         const targetTab = tab.dataset.tab;
+        if (!validTabs.includes(targetTab)) return;
 
         vizTabs.forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
@@ -254,10 +256,14 @@ function displayHostResult(host) {
     const hostCard = document.createElement('div');
     hostCard.className = 'host-card';
 
+    // Validate status against allowlist to prevent CSS class injection
+    const validStatuses = ['up', 'down'];
+    const safeStatus = validStatuses.includes(host.status) ? host.status : '';
+
     hostCard.innerHTML = `
         <div class="host-header">
             <span class="host-ip">${sanitizeHTML(host.ip)}</span>
-            <span class="host-status ${sanitizeHTML(host.status)}">${sanitizeHTML(host.status?.toUpperCase())}</span>
+            <span class="host-status ${safeStatus}">${sanitizeHTML(host.status?.toUpperCase())}</span>
         </div>
         <div class="host-info">
             ${host.hostname ? `
