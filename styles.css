@@ -715,6 +715,142 @@ body::before {
     }
 }
 
+/* Port State Badges */
+.port-state-open {
+    color: #00ff41;
+    font-weight: bold;
+}
+
+.port-state-filtered {
+    color: #ffaa00;
+    font-weight: bold;
+}
+
+/* Vulnerability Section */
+.vuln-section {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #ff5555;
+}
+
+.vuln-header {
+    color: #ff5555;
+    font-size: 0.95rem;
+    margin-bottom: 10px;
+}
+
+.vuln-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    background: rgba(255, 0, 0, 0.05);
+    border-left: 3px solid #ff5555;
+    border-radius: 0 4px 4px 0;
+}
+
+.vuln-severity {
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    min-width: 70px;
+    text-align: center;
+}
+
+.vuln-severity.critical {
+    background: rgba(220, 38, 38, 0.3);
+    color: #ff4444;
+    border: 1px solid #dc2626;
+}
+
+.vuln-severity.high {
+    background: rgba(255, 85, 85, 0.2);
+    color: #ff5555;
+    border: 1px solid #ff5555;
+}
+
+.vuln-severity.medium {
+    background: rgba(255, 170, 0, 0.2);
+    color: #ffaa00;
+    border: 1px solid #ffaa00;
+}
+
+.vuln-severity.low {
+    background: rgba(0, 200, 255, 0.2);
+    color: #00c8ff;
+    border: 1px solid #00c8ff;
+}
+
+.vuln-cve {
+    color: #ff0080;
+    font-weight: bold;
+    font-size: 0.85rem;
+}
+
+.vuln-name {
+    color: #ffffff;
+    font-size: 0.85rem;
+}
+
+.vuln-desc {
+    color: #888;
+    font-size: 0.8rem;
+    width: 100%;
+}
+
+/* Traceroute Section */
+.traceroute-section {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #ffaa00;
+}
+
+.traceroute-header {
+    color: #ffaa00;
+    font-size: 0.95rem;
+    margin-bottom: 10px;
+}
+
+.traceroute-hops {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.traceroute-hop {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 8px;
+    font-size: 0.85rem;
+}
+
+.hop-num {
+    color: #888;
+    min-width: 24px;
+    text-align: right;
+}
+
+.hop-ip {
+    color: #00ffff;
+    min-width: 140px;
+    font-weight: bold;
+}
+
+.hop-rtt {
+    color: #00ff41;
+    min-width: 70px;
+}
+
+.hop-host {
+    color: #888;
+    font-size: 0.8rem;
+}
+
 /* Reduced Motion Support */
 @media (prefers-reduced-motion: reduce) {
     *,
