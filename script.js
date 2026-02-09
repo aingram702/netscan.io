@@ -58,7 +58,7 @@ function setLoadingState(isLoading) {
 }
 
 // API Configuration - Flask serves both static files and API on port 5000
-const API_BASE_URL = `http://${window.location.hostname}:5000/api`;
+const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:5000/api`;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -167,18 +167,27 @@ async function startScan() {
             signal: scanAbortController.signal
         });
 
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || `Server error (${response.status})`);
+        }
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
+        let buffer = '';
 
         while (true) {
             const { done, value } = await reader.read();
 
             if (done) break;
 
-            const chunk = decoder.decode(value);
-            const lines = chunk.split('\n').filter(line => line.trim());
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            // Keep the last incomplete chunk in the buffer
+            buffer = lines.pop();
+            const completeLines = lines.filter(line => line.trim());
 
-            for (const line of lines) {
+            for (const line of completeLines) {
                 try {
                     const data = JSON.parse(line);
                     handleScanData(data);
@@ -307,11 +316,19 @@ function addTerminalLine(level, message, color = 'cyan') {
     line.className = 'terminal-line';
 
     const timestamp = new Date().toLocaleTimeString();
+    const allowedColors = ['cyan', 'green', 'yellow', 'red', 'white'];
+    const safeColor = allowedColors.includes(color) ? color : 'cyan';
 
-    line.innerHTML = `
-        <span class="prompt">[${level}]</span>
-        <span class="text-${color}">[${timestamp}] ${message}</span>
-    `;
+    const promptSpan = document.createElement('span');
+    promptSpan.className = 'prompt';
+    promptSpan.textContent = `[${level}]`;
+
+    const messageSpan = document.createElement('span');
+    messageSpan.className = `text-${safeColor}`;
+    messageSpan.textContent = `[${timestamp}] ${message}`;
+
+    line.appendChild(promptSpan);
+    line.appendChild(messageSpan);
 
     terminal.appendChild(line);
     terminal.scrollTop = terminal.scrollHeight;
@@ -625,6 +642,15 @@ function exportJSON() {
     setTimeout(() => exportJSONBtn.classList.remove('export-success'), 500);
 }
 
+// Sanitize a value for CSV to prevent formula injection
+function sanitizeCSVValue(val) {
+    const str = String(val ?? '');
+    if (/^[=+\-@\t\r]/.test(str)) {
+        return "'" + str;
+    }
+    return str;
+}
+
 function exportCSV() {
     if (scanResults.length === 0) {
         addTerminalLine('WARNING', 'No results to export', 'yellow');
@@ -635,9 +661,9 @@ function exportCSV() {
 
     scanResults.forEach(host => {
         const ports = host.ports ? host.ports.map(p => p.port).join(';') : '';
-        const services = host.ports ? host.ports.map(p => p.service).join(';') : '';
+        const services = host.ports ? host.ports.map(p => sanitizeCSVValue(p.service)).join(';') : '';
 
-        csv += `${host.ip},${host.status},${host.hostname || 'N/A'},${host.os || 'N/A'},"${ports}","${services}"\n`;
+        csv += `${sanitizeCSVValue(host.ip)},${sanitizeCSVValue(host.status)},${sanitizeCSVValue(host.hostname || 'N/A')},${sanitizeCSVValue(host.os || 'N/A')},"${sanitizeCSVValue(ports)}","${sanitizeCSVValue(services)}"\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });
