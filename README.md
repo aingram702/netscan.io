@@ -25,6 +25,8 @@ A powerful, real-time network scanning simulator built for **cybersecurity educa
 > **LEGAL NOTICE**: This is an educational simulation tool. Only scan networks you own or have explicit written permission to test. Unauthorized network scanning is illegal under the Computer Fraud and Abuse Act (CFAA) and similar laws worldwide.
 
 ---
+![Screenshot1 of the app](./images/1.png)
+![Screenshot2 of the app](./images/2.png)
 
 ## Table of Contents
 
