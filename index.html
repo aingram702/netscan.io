@@ -76,12 +76,26 @@
                         <option value="stealth">Stealth Scan (SYN)</option>
                         <option value="service">Service Detection</option>
                         <option value="os">OS Detection</option>
+                        <option value="udp">UDP Scan</option>
+                        <option value="vuln">Vulnerability Scan</option>
+                        <option value="aggressive">Aggressive Scan (All-in-One)</option>
                     </select>
                 </div>
 
                 <div class="input-group">
                     <label for="ports">Custom Ports (optional):</label>
-                    <input type="text" id="ports" placeholder="22,80,443 or 1-1000">
+                    <input type="text" id="ports" placeholder="22,80,443 or 1-1000" maxlength="200">
+                </div>
+
+                <div class="input-group">
+                    <label for="scanTiming">Scan Timing:</label>
+                    <select id="scanTiming">
+                        <option value="1">T1 - Paranoid (Slowest)</option>
+                        <option value="2">T2 - Polite</option>
+                        <option value="3" selected>T3 - Normal</option>
+                        <option value="4">T4 - Aggressive (Fast)</option>
+                        <option value="5">T5 - Insane (Fastest)</option>
+                    </select>
                 </div>
 
                 <div class="checkbox-group">
@@ -167,6 +181,8 @@
                     <button class="viz-tab active" data-tab="network">Network Map</button>
                     <button class="viz-tab" data-tab="ports">Port Distribution</button>
                     <button class="viz-tab" data-tab="services">Service Analysis</button>
+                    <button class="viz-tab" data-tab="os">OS Distribution</button>
+                    <button class="viz-tab" data-tab="vulns">Vulnerabilities</button>
                 </div>
 
                 <div class="viz-content">
@@ -183,6 +199,16 @@
                     <!-- Service Analysis -->
                     <div id="servicesTab" class="viz-panel">
                         <canvas id="serviceChart"></canvas>
+                    </div>
+
+                    <!-- OS Distribution -->
+                    <div id="osTab" class="viz-panel">
+                        <canvas id="osChart"></canvas>
+                    </div>
+
+                    <!-- Vulnerability Chart -->
+                    <div id="vulnsTab" class="viz-panel">
+                        <canvas id="vulnChart"></canvas>
                     </div>
                 </div>
             </section>

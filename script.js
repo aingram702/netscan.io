@@ -5,6 +5,7 @@ const clearResultsBtn = document.getElementById('clearResults');
 const targetIPInput = document.getElementById('targetIP');
 const scanTypeSelect = document.getElementById('scanType');
 const portsInput = document.getElementById('ports');
+const scanTimingSelect = document.getElementById('scanTiming');
 const autoRotateIPCheckbox = document.getElementById('autoRotateIP');
 const rotationIntervalSelect = document.getElementById('rotationInterval');
 const terminal = document.getElementById('terminal');
@@ -23,6 +24,8 @@ const vizTabs = document.querySelectorAll('.viz-tab');
 const networkMapCanvas = document.getElementById('networkMap');
 const portChartCanvas = document.getElementById('portChart');
 const serviceChartCanvas = document.getElementById('serviceChart');
+const osChartCanvas = document.getElementById('osChart');
+const vulnChartCanvas = document.getElementById('vulnChart');
 
 // State
 let isScanning = false;
@@ -32,6 +35,9 @@ let scanResults = [];
 let networkChart = null;
 let portChart = null;
 let serviceChart = null;
+let osChart = null;
+let vulnChart = null;
+let vizUpdatePending = false;
 
 // Security: HTML Sanitization to prevent XSS
 function sanitizeHTML(str) {
@@ -57,7 +63,7 @@ function setLoadingState(isLoading) {
     }
 }
 
-// API Configuration - Flask serves both static files and API on port 5000
+// API Configuration
 const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:5000/api`;
 
 // Initialize
@@ -75,11 +81,9 @@ exportPDFBtn.addEventListener('click', exportPDF);
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
-    // Ctrl+Enter to start scan
     if (e.ctrlKey && e.key === 'Enter' && !isScanning) {
         startScan();
     }
-    // Escape to stop scan
     if (e.key === 'Escape' && isScanning) {
         stopScan();
     }
@@ -98,7 +102,7 @@ targetIPInput.addEventListener('input', () => {
 });
 
 // Visualization Tab Switching
-const validTabs = ['network', 'ports', 'services'];
+const validTabs = ['network', 'ports', 'services', 'os', 'vulns'];
 vizTabs.forEach(tab => {
     tab.addEventListener('click', () => {
         const targetTab = tab.dataset.tab;
@@ -119,6 +123,7 @@ async function startScan() {
     const target = targetIPInput.value.trim();
     const scanType = scanTypeSelect.value;
     const ports = portsInput.value.trim();
+    const timing = parseInt(scanTimingSelect.value) || 3;
 
     if (!target) {
         addTerminalLine('ERROR', 'Target IP/Range is required', 'red');
@@ -140,6 +145,7 @@ async function startScan() {
     stopScanBtn.disabled = false;
     scanStatusSpan.textContent = 'SCANNING';
     scanStatusSpan.className = 'status-value status-scanning';
+    setLoadingState(true);
 
     // Clear previous results
     scanResults = [];
@@ -150,21 +156,19 @@ async function startScan() {
         startIPRotation();
     }
 
-    // Add scan start message
     addTerminalLine('INFO', `Starting ${scanType.toUpperCase()} scan on ${target}`, 'cyan');
     addTerminalLine('INFO', `Source IP: ${currentIPSpan.textContent}`, 'cyan');
 
     try {
         const response = await fetch(`${API_BASE_URL}/scan`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 target: target,
                 scanType: scanType,
                 ports: ports,
-                sourceIP: currentIPSpan.textContent
+                sourceIP: currentIPSpan.textContent,
+                timing: timing
             }),
             signal: scanAbortController.signal
         });
@@ -180,12 +184,10 @@ async function startScan() {
 
         while (true) {
             const { done, value } = await reader.read();
-
             if (done) break;
 
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
-            // Keep the last incomplete chunk in the buffer
             buffer = lines.pop();
             const completeLines = lines.filter(line => line.trim());
 
@@ -199,10 +201,11 @@ async function startScan() {
             }
         }
 
-        // Scan complete
         scanStatusSpan.textContent = 'COMPLETE';
         scanStatusSpan.className = 'status-value status-complete';
         addTerminalLine('SUCCESS', 'Scan completed successfully', 'green');
+        // Final viz update
+        updateVisualizations();
 
     } catch (error) {
         if (error.name === 'AbortError') {
@@ -212,6 +215,7 @@ async function startScan() {
         }
     } finally {
         stopScan();
+        setLoadingState(false);
     }
 }
 
@@ -220,16 +224,15 @@ function stopScan() {
     if (scanAbortController) {
         scanAbortController.abort();
     }
-
     isScanning = false;
     startScanBtn.disabled = false;
     stopScanBtn.disabled = true;
+    setLoadingState(false);
 
     if (scanStatusSpan.textContent === 'SCANNING') {
         scanStatusSpan.textContent = 'STOPPED';
         scanStatusSpan.className = 'status-value status-idle';
     }
-
     stopIPRotation();
 }
 
@@ -241,78 +244,96 @@ function handleScanData(data) {
         scanResults.push(data);
         displayHostResult(data);
         updateStatistics();
-        updateVisualizations();
+        scheduleVizUpdate();
+    }
+}
+
+// Debounce visualization updates for speed during rapid scanning
+function scheduleVizUpdate() {
+    if (!vizUpdatePending) {
+        vizUpdatePending = true;
+        requestAnimationFrame(() => {
+            updateVisualizations();
+            vizUpdatePending = false;
+        });
     }
 }
 
 // Display Host Result
 function displayHostResult(host) {
-    // Remove "no results" message if it exists
     const noResults = resultsContainer.querySelector('.no-results');
-    if (noResults) {
-        noResults.remove();
-    }
+    if (noResults) noResults.remove();
 
     const hostCard = document.createElement('div');
     hostCard.className = 'host-card';
 
-    // Validate status against allowlist to prevent CSS class injection
     const validStatuses = ['up', 'down'];
     const safeStatus = validStatuses.includes(host.status) ? host.status : '';
 
-    hostCard.innerHTML = `
+    let html = `
         <div class="host-header">
             <span class="host-ip">${sanitizeHTML(host.ip)}</span>
             <span class="host-status ${safeStatus}">${sanitizeHTML(host.status?.toUpperCase())}</span>
         </div>
         <div class="host-info">
-            ${host.hostname ? `
-                <div class="info-item">
-                    <span class="info-label">Hostname</span>
-                    <span class="info-value">${sanitizeHTML(host.hostname)}</span>
-                </div>
-            ` : ''}
-            ${host.os ? `
-                <div class="info-item">
-                    <span class="info-label">Operating System</span>
-                    <span class="info-value">${sanitizeHTML(host.os)}</span>
-                </div>
-            ` : ''}
-            ${host.mac ? `
-                <div class="info-item">
-                    <span class="info-label">MAC Address</span>
-                    <span class="info-value">${sanitizeHTML(host.mac)}</span>
-                </div>
-            ` : ''}
-            <div class="info-item">
-                <span class="info-label">Response Time</span>
-                <span class="info-value">${sanitizeHTML(host.latency) || 'N/A'}</span>
-            </div>
-        </div>
-        ${host.ports && host.ports.length > 0 ? `
-            <table class="ports-table">
-                <thead>
-                    <tr>
-                        <th>Port</th>
-                        <th>State</th>
-                        <th>Service</th>
-                        <th>Version</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${host.ports.map(port => `
-                        <tr>
-                            <td>${sanitizeHTML(String(port.port))}</td>
-                            <td>${sanitizeHTML(port.state)}</td>
-                            <td>${sanitizeHTML(port.service) || 'unknown'}</td>
-                            <td>${sanitizeHTML(port.version) || 'N/A'}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        ` : ''}
-    `;
+            ${host.hostname ? `<div class="info-item"><span class="info-label">Hostname</span><span class="info-value">${sanitizeHTML(host.hostname)}</span></div>` : ''}
+            ${host.os ? `<div class="info-item"><span class="info-label">Operating System</span><span class="info-value">${sanitizeHTML(host.os)}</span></div>` : ''}
+            ${host.mac ? `<div class="info-item"><span class="info-label">MAC Address</span><span class="info-value">${sanitizeHTML(host.mac)}</span></div>` : ''}
+            <div class="info-item"><span class="info-label">Response Time</span><span class="info-value">${sanitizeHTML(host.latency) || 'N/A'}</span></div>
+        </div>`;
 
+    // Ports table
+    if (host.ports && host.ports.length > 0) {
+        html += `
+        <table class="ports-table">
+            <thead><tr>
+                <th>Port</th><th>State</th><th>Protocol</th><th>Service</th><th>Version</th>
+            </tr></thead>
+            <tbody>
+                ${host.ports.map(port => `<tr>
+                    <td>${sanitizeHTML(String(port.port))}</td>
+                    <td><span class="port-state-${port.state === 'open' ? 'open' : 'filtered'}">${sanitizeHTML(port.state)}</span></td>
+                    <td>${sanitizeHTML(port.protocol || 'tcp')}</td>
+                    <td>${sanitizeHTML(port.service) || 'unknown'}</td>
+                    <td>${sanitizeHTML(port.version) || 'N/A'}</td>
+                </tr>`).join('')}
+            </tbody>
+        </table>`;
+    }
+
+    // Vulnerabilities
+    if (host.vulnerabilities && host.vulnerabilities.length > 0) {
+        html += `<div class="vuln-section">
+            <h4 class="vuln-header">Vulnerabilities Found (${host.vulnerabilities.length})</h4>
+            ${host.vulnerabilities.map(v => {
+                const validSeverities = ['critical', 'high', 'medium', 'low'];
+                const safeSev = validSeverities.includes(v.severity) ? v.severity : '';
+                return `<div class="vuln-item">
+                    <span class="vuln-severity ${safeSev}">${sanitizeHTML(v.severity?.toUpperCase())}</span>
+                    <span class="vuln-cve">${sanitizeHTML(v.cve)}</span>
+                    <span class="vuln-name">${sanitizeHTML(v.name)}</span>
+                    <span class="vuln-desc">${sanitizeHTML(v.description)}</span>
+                </div>`;
+            }).join('')}
+        </div>`;
+    }
+
+    // Traceroute
+    if (host.traceroute && host.traceroute.length > 0) {
+        html += `<div class="traceroute-section">
+            <h4 class="traceroute-header">Traceroute (${host.traceroute.length} hops)</h4>
+            <div class="traceroute-hops">
+                ${host.traceroute.map(hop => `<div class="traceroute-hop">
+                    <span class="hop-num">${sanitizeHTML(String(hop.hop))}</span>
+                    <span class="hop-ip">${sanitizeHTML(hop.ip)}</span>
+                    <span class="hop-rtt">${hop.rtt ? sanitizeHTML(hop.rtt) : '* * *'}</span>
+                    ${hop.hostname ? `<span class="hop-host">${sanitizeHTML(hop.hostname)}</span>` : ''}
+                </div>`).join('')}
+            </div>
+        </div>`;
+    }
+
+    hostCard.innerHTML = html;
     resultsContainer.appendChild(hostCard);
 }
 
@@ -344,7 +365,7 @@ function addTerminalLine(level, message, color = 'cyan') {
 function clearTerminal() {
     terminal.innerHTML = `
         <div class="terminal-line">
-            <span class="prompt">[NetScanner]$</span> 
+            <span class="prompt">[NetScanner]$</span>
             <span class="text-green">System initialized. Ready for reconnaissance...</span>
         </div>
     `;
@@ -365,6 +386,8 @@ function clearResults() {
     if (networkChart) networkChart.destroy();
     if (portChart) portChart.destroy();
     if (serviceChart) serviceChart.destroy();
+    if (osChart) osChart.destroy();
+    if (vulnChart) vulnChart.destroy();
 
     updateVisualizations();
 }
@@ -378,20 +401,12 @@ function updateStatistics() {
 // IP Rotation Functions
 function startIPRotation() {
     const intervalSeconds = parseInt(rotationIntervalSelect.value);
-
-    // Rotate immediately on start
     rotateIP();
-
-    // If interval is 0, rotate on every request (handled in startScan)
     if (intervalSeconds === 0) {
         addTerminalLine('INFO', 'IP rotation: Every request (random IP per scan)', 'cyan');
         return;
     }
-
-    ipRotationInterval = setInterval(() => {
-        rotateIP();
-    }, intervalSeconds * 1000);
-
+    ipRotationInterval = setInterval(() => rotateIP(), intervalSeconds * 1000);
     addTerminalLine('INFO', `IP rotation enabled (every ${intervalSeconds}s)`, 'cyan');
 }
 
@@ -409,13 +424,9 @@ function rotateIP() {
 }
 
 function generateRandomIP() {
-    // Generate completely random IP (avoiding reserved ranges)
     const classes = [
-        // Class A private-like ranges (simulating diverse source IPs)
         () => `${randomInt(1, 126)}.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 254)}`,
-        // Class B style
         () => `${randomInt(128, 191)}.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 254)}`,
-        // Class C style  
         () => `${randomInt(192, 223)}.${randomInt(0, 255)}.${randomInt(0, 255)}.${randomInt(1, 254)}`
     ];
     return classes[randomInt(0, 2)]();
@@ -425,55 +436,114 @@ function randomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// Visualization Functions
+
+// ── Visualization Functions ─────────────────────────────────────────────
+
+const chartFont = { family: 'Fira Code' };
+const chartColors = {
+    green: 'rgba(0, 255, 65, 0.8)',
+    red: 'rgba(255, 85, 85, 0.8)',
+    cyan: 'rgba(0, 255, 255, 0.8)',
+    pink: 'rgba(255, 0, 128, 0.8)',
+    orange: 'rgba(255, 170, 0, 0.8)',
+    purple: 'rgba(128, 0, 255, 0.8)',
+    yellow: 'rgba(255, 255, 0, 0.8)',
+    blue: 'rgba(0, 128, 255, 0.8)',
+};
+
 function updateVisualizations() {
     updateNetworkMap();
     updatePortChart();
     updateServiceChart();
+    updateOSChart();
+    updateVulnChart();
 }
 
-// Network Map Visualization
+// Network Map - Bubble chart: IPs by open ports and latency
 function updateNetworkMap() {
     const ctx = networkMapCanvas.getContext('2d');
-
-    if (networkChart) {
-        networkChart.destroy();
-    }
+    if (networkChart) networkChart.destroy();
 
     const hostsUp = scanResults.filter(h => h.status === 'up');
     const hostsDown = scanResults.filter(h => h.status === 'down');
-    const totalPorts = hostsUp.reduce((sum, h) => sum + (h.ports?.length || 0), 0);
+
+    // If no data or only basic stats, show summary doughnut
+    if (hostsUp.length === 0 && hostsDown.length === 0) {
+        networkChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['No Data'],
+                datasets: [{ data: [1], backgroundColor: ['rgba(85,85,85,0.5)'], borderWidth: 0 }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: true,
+                plugins: {
+                    legend: { labels: { color: '#00ff41', font: chartFont } },
+                    title: { display: true, text: 'Network Overview', color: '#00ff41', font: { ...chartFont, size: 18 } }
+                }
+            }
+        });
+        return;
+    }
+
+    // Build bubble data: x = index, y = port count, r = latency
+    const upData = hostsUp.map((h, i) => ({
+        x: i,
+        y: h.ports?.length || 0,
+        r: Math.max(5, Math.min(25, parseInt(h.latency) || 5)),
+        label: h.ip
+    }));
+    const downData = hostsDown.map((h, i) => ({
+        x: hostsUp.length + i,
+        y: 0,
+        r: 5,
+        label: h.ip
+    }));
 
     networkChart = new Chart(ctx, {
-        type: 'doughnut',
+        type: 'bubble',
         data: {
-            labels: ['Hosts Up', 'Hosts Down', 'Total Ports Open'],
-            datasets: [{
-                data: [hostsUp.length, hostsDown.length, totalPorts],
-                backgroundColor: [
-                    'rgba(0, 255, 65, 0.8)',
-                    'rgba(255, 85, 85, 0.8)',
-                    'rgba(0, 255, 255, 0.8)'
-                ],
-                borderColor: ['#00ff41', '#ff5555', '#00ffff'],
-                borderWidth: 2
-            }]
+            datasets: [
+                {
+                    label: 'Hosts Up',
+                    data: upData,
+                    backgroundColor: chartColors.green,
+                    borderColor: '#00ff41',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Hosts Down',
+                    data: downData,
+                    backgroundColor: chartColors.red,
+                    borderColor: '#ff5555',
+                    borderWidth: 1
+                }
+            ]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    labels: {
-                        color: '#00ff41',
-                        font: { family: 'Fira Code', size: 14 }
-                    }
+            responsive: true, maintainAspectRatio: true,
+            scales: {
+                y: {
+                    beginAtZero: true, title: { display: true, text: 'Open Ports', color: '#00ff41', font: chartFont },
+                    ticks: { color: '#00ff41', font: chartFont, stepSize: 1 },
+                    grid: { color: 'rgba(0,255,65,0.1)' }
                 },
-                title: {
-                    display: true,
-                    text: 'Network Overview',
-                    color: '#00ff41',
-                    font: { family: 'Fira Code', size: 18 }
+                x: {
+                    title: { display: true, text: 'Host Index', color: '#00ff41', font: chartFont },
+                    ticks: { color: '#00ff41', font: chartFont },
+                    grid: { color: 'rgba(0,255,65,0.1)' }
+                }
+            },
+            plugins: {
+                legend: { labels: { color: '#00ff41', font: chartFont } },
+                title: { display: true, text: 'Network Topology (bubble size = latency)', color: '#00ff41', font: { ...chartFont, size: 16 } },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => {
+                            const d = ctx.raw;
+                            return `${d.label}: ${d.y} ports, ${d.r}ms latency`;
+                        }
+                    }
                 }
             }
         }
@@ -483,69 +553,41 @@ function updateNetworkMap() {
 // Port Distribution Chart
 function updatePortChart() {
     const ctx = portChartCanvas.getContext('2d');
-
-    if (portChart) {
-        portChart.destroy();
-    }
+    if (portChart) portChart.destroy();
 
     const portCounts = {};
     scanResults.forEach(host => {
         if (host.ports) {
             host.ports.forEach(port => {
-                portCounts[port.port] = (portCounts[port.port] || 0) + 1;
+                const key = `${port.port}/${port.protocol || 'tcp'}`;
+                portCounts[key] = (portCounts[key] || 0) + 1;
             });
         }
     });
 
-    const sortedPorts = Object.entries(portCounts)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10);
+    const sortedPorts = Object.entries(portCounts).sort((a, b) => b[1] - a[1]).slice(0, 15);
 
     portChart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: sortedPorts.map(([port]) => `Port ${port}`),
+            labels: sortedPorts.map(([port]) => port),
             datasets: [{
                 label: 'Occurrences',
                 data: sortedPorts.map(([, count]) => count),
-                backgroundColor: 'rgba(255, 0, 128, 0.8)',
+                backgroundColor: chartColors.pink,
                 borderColor: '#ff0080',
                 borderWidth: 2
             }]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: true,
+            responsive: true, maintainAspectRatio: true, indexAxis: 'y',
             scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        color: '#00ff41',
-                        font: { family: 'Fira Code' }
-                    },
-                    grid: { color: 'rgba(0, 255, 65, 0.1)' }
-                },
-                x: {
-                    ticks: {
-                        color: '#00ff41',
-                        font: { family: 'Fira Code' }
-                    },
-                    grid: { color: 'rgba(0, 255, 65, 0.1)' }
-                }
+                x: { beginAtZero: true, ticks: { color: '#00ff41', font: chartFont }, grid: { color: 'rgba(0,255,65,0.1)' } },
+                y: { ticks: { color: '#00ff41', font: chartFont }, grid: { color: 'rgba(0,255,65,0.1)' } }
             },
             plugins: {
-                legend: {
-                    labels: {
-                        color: '#00ff41',
-                        font: { family: 'Fira Code' }
-                    }
-                },
-                title: {
-                    display: true,
-                    text: 'Top 10 Open Ports',
-                    color: '#00ff41',
-                    font: { family: 'Fira Code', size: 18 }
-                }
+                legend: { labels: { color: '#00ff41', font: chartFont } },
+                title: { display: true, text: 'Top Open Ports', color: '#00ff41', font: { ...chartFont, size: 18 } }
             }
         }
     });
@@ -554,10 +596,7 @@ function updatePortChart() {
 // Service Analysis Chart
 function updateServiceChart() {
     const ctx = serviceChartCanvas.getContext('2d');
-
-    if (serviceChart) {
-        serviceChart.destroy();
-    }
+    if (serviceChart) serviceChart.destroy();
 
     const serviceCounts = {};
     scanResults.forEach(host => {
@@ -569,9 +608,8 @@ function updateServiceChart() {
         }
     });
 
-    const sortedServices = Object.entries(serviceCounts)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 8);
+    const sortedServices = Object.entries(serviceCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const colors = Object.values(chartColors);
 
     serviceChart = new Chart(ctx, {
         type: 'polarArea',
@@ -579,51 +617,115 @@ function updateServiceChart() {
             labels: sortedServices.map(([service]) => service.toUpperCase()),
             datasets: [{
                 data: sortedServices.map(([, count]) => count),
-                backgroundColor: [
-                    'rgba(0, 255, 65, 0.7)',
-                    'rgba(255, 0, 128, 0.7)',
-                    'rgba(0, 255, 255, 0.7)',
-                    'rgba(255, 170, 0, 0.7)',
-                    'rgba(128, 0, 255, 0.7)',
-                    'rgba(255, 255, 0, 0.7)',
-                    'rgba(0, 128, 255, 0.7)',
-                    'rgba(255, 128, 0, 0.7)'
-                ],
-                borderColor: '#00ff41',
-                borderWidth: 2
+                backgroundColor: sortedServices.map((_, i) => colors[i % colors.length]),
+                borderColor: '#00ff41', borderWidth: 2
             }]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: true,
+            responsive: true, maintainAspectRatio: true,
             plugins: {
-                legend: {
-                    labels: {
-                        color: '#00ff41',
-                        font: { family: 'Fira Code' }
-                    }
-                },
+                legend: { labels: { color: '#00ff41', font: chartFont } },
+                title: { display: true, text: 'Service Distribution', color: '#00ff41', font: { ...chartFont, size: 18 } }
+            },
+            scales: { r: { ticks: { color: '#00ff41', backdropColor: 'transparent' }, grid: { color: 'rgba(0,255,65,0.2)' } } }
+        }
+    });
+}
+
+// OS Distribution Chart
+function updateOSChart() {
+    const ctx = osChartCanvas.getContext('2d');
+    if (osChart) osChart.destroy();
+
+    const osCounts = {};
+    scanResults.forEach(host => {
+        if (host.os) {
+            osCounts[host.os] = (osCounts[host.os] || 0) + 1;
+        }
+    });
+
+    const sortedOS = Object.entries(osCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const colors = Object.values(chartColors);
+
+    osChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: sortedOS.length > 0 ? sortedOS.map(([os]) => os) : ['No OS Data'],
+            datasets: [{
+                data: sortedOS.length > 0 ? sortedOS.map(([, count]) => count) : [1],
+                backgroundColor: sortedOS.length > 0
+                    ? sortedOS.map((_, i) => colors[i % colors.length])
+                    : ['rgba(85,85,85,0.5)'],
+                borderColor: '#0a0e27', borderWidth: 3
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: true,
+            plugins: {
+                legend: { position: 'right', labels: { color: '#00ff41', font: chartFont, padding: 12 } },
+                title: { display: true, text: 'OS Distribution', color: '#00ff41', font: { ...chartFont, size: 18 } }
+            }
+        }
+    });
+}
+
+// Vulnerability Severity Chart
+function updateVulnChart() {
+    const ctx = vulnChartCanvas.getContext('2d');
+    if (vulnChart) vulnChart.destroy();
+
+    const sevCounts = { critical: 0, high: 0, medium: 0, low: 0 };
+    scanResults.forEach(host => {
+        if (host.vulnerabilities) {
+            host.vulnerabilities.forEach(v => {
+                if (v.severity in sevCounts) sevCounts[v.severity]++;
+            });
+        }
+    });
+
+    const total = Object.values(sevCounts).reduce((a, b) => a + b, 0);
+    const sevColors = {
+        critical: 'rgba(220, 38, 38, 0.9)',
+        high: 'rgba(255, 85, 85, 0.9)',
+        medium: 'rgba(255, 170, 0, 0.9)',
+        low: 'rgba(0, 200, 255, 0.9)'
+    };
+
+    vulnChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['Critical', 'High', 'Medium', 'Low'],
+            datasets: [{
+                label: 'Vulnerabilities',
+                data: [sevCounts.critical, sevCounts.high, sevCounts.medium, sevCounts.low],
+                backgroundColor: Object.values(sevColors),
+                borderColor: Object.values(sevColors).map(c => c.replace('0.9', '1')),
+                borderWidth: 2,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: true,
+            scales: {
+                y: { beginAtZero: true, ticks: { color: '#00ff41', font: chartFont, stepSize: 1 }, grid: { color: 'rgba(0,255,65,0.1)' } },
+                x: { ticks: { color: '#00ff41', font: chartFont }, grid: { color: 'rgba(0,255,65,0.1)' } }
+            },
+            plugins: {
+                legend: { display: false },
                 title: {
                     display: true,
-                    text: 'Service Distribution',
-                    color: '#00ff41',
-                    font: { family: 'Fira Code', size: 18 }
-                }
-            },
-            scales: {
-                r: {
-                    ticks: {
-                        color: '#00ff41',
-                        backdropColor: 'transparent'
-                    },
-                    grid: { color: 'rgba(0, 255, 65, 0.2)' }
+                    text: total > 0 ? `Vulnerability Severity (${total} total)` : 'Vulnerability Severity (run vuln/aggressive scan)',
+                    color: total > 0 ? '#ff5555' : '#888',
+                    font: { ...chartFont, size: 16 }
                 }
             }
         }
     });
 }
 
-// Export Functions
+
+// ── Export Functions ─────────────────────────────────────────────────────
+
 function exportJSON() {
     if (scanResults.length === 0) {
         addTerminalLine('WARNING', 'No results to export', 'yellow');
@@ -648,7 +750,6 @@ function exportJSON() {
     setTimeout(() => exportJSONBtn.classList.remove('export-success'), 500);
 }
 
-// Sanitize a value for CSV to prevent formula injection
 function sanitizeCSVValue(val) {
     const str = String(val ?? '');
     if (/^[=+\-@\t\r]/.test(str)) {
@@ -663,13 +764,14 @@ function exportCSV() {
         return;
     }
 
-    let csv = 'IP Address,Status,Hostname,OS,Open Ports,Services\n';
+    let csv = 'IP Address,Status,Hostname,OS,Open Ports,Services,Vulnerabilities\n';
 
     scanResults.forEach(host => {
-        const ports = host.ports ? host.ports.map(p => p.port).join(';') : '';
+        const ports = host.ports ? host.ports.map(p => `${p.port}/${p.protocol || 'tcp'}`).join(';') : '';
         const services = host.ports ? host.ports.map(p => sanitizeCSVValue(p.service)).join(';') : '';
+        const vulns = host.vulnerabilities ? host.vulnerabilities.map(v => sanitizeCSVValue(v.cve)).join(';') : '';
 
-        csv += `${sanitizeCSVValue(host.ip)},${sanitizeCSVValue(host.status)},${sanitizeCSVValue(host.hostname || 'N/A')},${sanitizeCSVValue(host.os || 'N/A')},"${sanitizeCSVValue(ports)}","${sanitizeCSVValue(services)}"\n`;
+        csv += `${sanitizeCSVValue(host.ip)},${sanitizeCSVValue(host.status)},${sanitizeCSVValue(host.hostname || 'N/A')},${sanitizeCSVValue(host.os || 'N/A')},"${sanitizeCSVValue(ports)}","${sanitizeCSVValue(services)}","${sanitizeCSVValue(vulns)}"\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -702,33 +804,36 @@ async function exportPDF() {
     pdf.text(`Generated: ${new Date().toLocaleString()}`, 20, 30);
     pdf.text(`Target: ${targetIPInput.value}`, 20, 36);
     pdf.text(`Scan Type: ${scanTypeSelect.value.toUpperCase()}`, 20, 42);
+    pdf.text(`Timing: T${scanTimingSelect.value}`, 20, 48);
 
     // Statistics
     pdf.setFontSize(14);
     pdf.setTextColor(0, 0, 0);
-    pdf.text('Summary Statistics', 20, 55);
+    pdf.text('Summary Statistics', 20, 60);
 
     pdf.setFontSize(10);
     const hostsUp = scanResults.filter(h => h.status === 'up').length;
     const totalPorts = scanResults.reduce((sum, h) => sum + (h.ports?.length || 0), 0);
+    const totalVulns = scanResults.reduce((sum, h) => sum + (h.vulnerabilities?.length || 0), 0);
 
-    pdf.text(`Total Hosts Scanned: ${scanResults.length}`, 20, 65);
-    pdf.text(`Hosts Up: ${hostsUp}`, 20, 71);
-    pdf.text(`Hosts Down: ${scanResults.length - hostsUp}`, 20, 77);
-    pdf.text(`Total Open Ports: ${totalPorts}`, 20, 83);
+    pdf.text(`Total Hosts Scanned: ${scanResults.length}`, 20, 70);
+    pdf.text(`Hosts Up: ${hostsUp}`, 20, 76);
+    pdf.text(`Hosts Down: ${scanResults.length - hostsUp}`, 20, 82);
+    pdf.text(`Total Open Ports: ${totalPorts}`, 20, 88);
+    if (totalVulns > 0) {
+        pdf.setTextColor(200, 0, 0);
+        pdf.text(`Vulnerabilities Found: ${totalVulns}`, 20, 94);
+        pdf.setTextColor(0, 0, 0);
+    }
 
-    // Results Table
-    let yPos = 95;
+    let yPos = totalVulns > 0 ? 108 : 102;
     pdf.setFontSize(12);
     pdf.text('Scan Results', 20, yPos);
     yPos += 10;
 
     pdf.setFontSize(8);
     scanResults.forEach((host, index) => {
-        if (yPos > 270) {
-            pdf.addPage();
-            yPos = 20;
-        }
+        if (yPos > 270) { pdf.addPage(); yPos = 20; }
 
         pdf.setTextColor(0, 0, 0);
         pdf.text(`${index + 1}. ${host.ip} - ${host.status.toUpperCase()}`, 20, yPos);
@@ -736,32 +841,31 @@ async function exportPDF() {
 
         if (host.hostname) {
             pdf.setTextColor(100, 100, 100);
-            pdf.text(`   Hostname: ${host.hostname}`, 25, yPos);
-            yPos += 5;
+            pdf.text(`   Hostname: ${host.hostname}`, 25, yPos); yPos += 5;
         }
-
         if (host.os) {
-            pdf.text(`   OS: ${host.os}`, 25, yPos);
-            yPos += 5;
+            pdf.text(`   OS: ${host.os}`, 25, yPos); yPos += 5;
         }
-
         if (host.ports && host.ports.length > 0) {
-            const portList = host.ports.map(p => `${p.port}(${p.service})`).join(', ');
-            const lines = pdf.splitTextToSize(`   Open Ports: ${portList}`, 170);
+            const portList = host.ports.map(p => `${p.port}/${p.protocol || 'tcp'}(${p.service})`).join(', ');
+            const lines = pdf.splitTextToSize(`   Ports: ${portList}`, 170);
             lines.forEach(line => {
-                if (yPos > 270) {
-                    pdf.addPage();
-                    yPos = 20;
-                }
-                pdf.text(line, 25, yPos);
-                yPos += 5;
+                if (yPos > 270) { pdf.addPage(); yPos = 20; }
+                pdf.text(line, 25, yPos); yPos += 5;
             });
         }
-
+        if (host.vulnerabilities && host.vulnerabilities.length > 0) {
+            pdf.setTextColor(200, 0, 0);
+            host.vulnerabilities.forEach(v => {
+                if (yPos > 270) { pdf.addPage(); yPos = 20; }
+                pdf.text(`   [${v.severity.toUpperCase()}] ${v.cve} - ${v.name}`, 25, yPos); yPos += 5;
+            });
+            pdf.setTextColor(100, 100, 100);
+        }
         yPos += 3;
     });
 
-    // Add Charts
+    // Charts
     try {
         pdf.addPage();
         pdf.setFontSize(14);
@@ -777,6 +881,15 @@ async function exportPDF() {
         pdf.addPage();
         const serviceImg = serviceChartCanvas.toDataURL('image/png');
         pdf.addImage(serviceImg, 'PNG', 20, 30, 170, 85);
+
+        const osImg = osChartCanvas.toDataURL('image/png');
+        pdf.addImage(osImg, 'PNG', 20, 130, 170, 85);
+
+        if (totalVulns > 0) {
+            pdf.addPage();
+            const vulnImg = vulnChartCanvas.toDataURL('image/png');
+            pdf.addImage(vulnImg, 'PNG', 20, 30, 170, 85);
+        }
     } catch (error) {
         console.error('Error adding charts to PDF:', error);
     }
