@@ -49,9 +49,6 @@ A powerful, real-time network scanning simulator built for **cybersecurity educa
 
 ---
 
-![Screenshot1 of the app](./images/1.png)
-![Screenshot2 of the app](./images/2.png)
-
 
 ## Features
 
