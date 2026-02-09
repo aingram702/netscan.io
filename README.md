@@ -10,6 +10,10 @@ A web-based network reconnaissance simulator with real-time visualization. Built
 
 ---
 
+![Screenshot1 of the app](./images/1.png)
+![Screenshot2 of the app](./images/2.png)
+
+
 ## Features
 
 ### Scan Types
