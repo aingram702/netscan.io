@@ -581,6 +581,7 @@ const chartColors = {
 };
 
 function updateVisualizations() {
+    if (typeof Chart === 'undefined') return; // CDN not loaded
     updateNetworkMap();
     updatePortChart();
     updateServiceChart();
