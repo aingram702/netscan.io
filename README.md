@@ -4,19 +4,19 @@
 
 ### Real nmap-Powered Web Network Scanner
 
-[![Version](https://img.shields.io/badge/version-3.0.0-00d4ff?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/aingram702/netscan.net)
+[![Version](https://img.shields.io/badge/version-3.1.0-00d4ff?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/aingram702/netscan.net)
 [![Python](https://img.shields.io/badge/python-3.8+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![nmap](https://img.shields.io/badge/nmap-required-4682B4?style=for-the-badge&logo=gnu-bash&logoColor=white)](https://nmap.org/)
 [![Flask](https://img.shields.io/badge/flask-3.x-000000?style=for-the-badge&logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
-A web-based network scanner that wraps **real nmap** with a modern UI, real-time NDJSON streaming, 5 interactive Chart.js visualizations, and professional PDF report generation.
+A web-based network scanner that wraps **real nmap** with a modern UI, real-time NDJSON streaming, 5 interactive Chart.js visualizations, proxychains integration, and professional PDF report generation.
 
 **This tool performs real network scans.** All data comes from actual nmap output - no simulations.
 
 ---
 
-[Quick Start](#-quick-start) | [Scan Types](#-scan-types) | [Architecture](#-architecture) | [API](#-api-reference) | [Security](#-security)
+[Quick Start](#-quick-start) | [Scan Types](#-scan-types) | [Proxychains](#-proxychains) | [Architecture](#-architecture) | [API](#-api-reference) | [Security](#-security)
 
 </div>
 
@@ -34,6 +34,7 @@ A web-based network scanner that wraps **real nmap** with a modern UI, real-time
 - [Prerequisites](#prerequisites)
 - [Scan Types](#-scan-types)
 - [Timing Profiles](#-timing-profiles)
+- [Proxychains](#-proxychains)
 - [Features](#-features)
 - [Architecture](#-architecture)
 - [Project Structure](#-project-structure)
@@ -53,8 +54,9 @@ A web-based network scanner that wraps **real nmap** with a modern UI, real-time
 | **Scanning** | 9 scan types including vulnerability detection, UDP scanning, and aggressive all-in-one mode |
 | **Speed** | 5 timing profiles (T1-T5) inspired by nmap, from stealthy to maximum throughput |
 | **Targeting** | Single IPs, CIDR notation (`/8` to `/32`), IP ranges, and custom port specifications |
+| **Proxychains** | Route scans through SOCKS4/5 or HTTP proxy chains for anonymity. Supports strict, dynamic, and random chain types |
 | **Visualization** | 5 interactive Chart.js tabs - network topology, port distribution, services, OS fingerprints, vulnerabilities |
-| **Vulnerability DB** | 25+ real-world CVEs including Log4Shell, BlueKeep, EternalBlue, Spring4Shell, ProxyLogon |
+| **Vulnerability DB** | Real-world CVE extraction from nmap script output with CVSS severity parsing |
 | **Export** | JSON, CSV (with injection protection), and professional PDF reports with embedded charts |
 | **Real-time** | NDJSON streaming delivers results as each host is scanned - no waiting for completion |
 | **Security** | CSP headers, rate limiting, input sanitization, path traversal prevention, XSS protection |
@@ -68,6 +70,7 @@ A web-based network scanner that wraps **real nmap** with a modern UI, real-time
 - **Python 3.8+** with pip
 - **nmap** installed and in PATH
 - **Modern web browser** (Chrome, Firefox, Safari, Edge)
+- **proxychains4** (optional) - for routing scans through proxies
 
 ### Install nmap
 
@@ -85,6 +88,22 @@ sudo dnf install nmap
 sudo pacman -S nmap
 
 # Windows - download from https://nmap.org/download.html
+```
+
+### Install proxychains (optional)
+
+```bash
+# Ubuntu/Debian
+sudo apt install proxychains4
+
+# macOS
+brew install proxychains-ng
+
+# Fedora/RHEL
+sudo dnf install proxychains-ng
+
+# Arch
+sudo pacman -S proxychains-ng
 ```
 
 ### Install & Run
@@ -138,7 +157,7 @@ Each scan type maps directly to real nmap flags:
 | Format | Example | Description |
 |--------|---------|-------------|
 | Single IP | `192.168.1.1` | Scan one host |
-| CIDR | `10.0.0.0/24` | Scan a subnet |
+| CIDR | `10.0.0.0/24` | Scan a subnet (minimum /8) |
 | IP Range | `192.168.1.1-192.168.1.254` | Scan a specific range |
 | Hostname | `example.com` | DNS-resolved scan |
 
@@ -171,22 +190,46 @@ Maps directly to nmap's `-T` templates:
 
 ---
 
-## Features
+## Proxychains
 
-| Feature | Details |
-|---------|---------|
-| **Real nmap scanning** | All 9 scan types powered by actual nmap via python-nmap |
-| **NDJSON streaming** | Results arrive host-by-host in real-time as nmap scans each target |
-| **5 visualizations** | Network topology (bubble), port distribution (bar), services (polar), OS (doughnut), vulns (bar) |
-| **Vulnerability extraction** | Parses CVE identifiers and CVSS scores from nmap script output |
-| **Export** | JSON, CSV (injection-protected), PDF (with embedded charts via jsPDF) |
-| **Hostname support** | Scan by hostname in addition to IP/CIDR/range |
-| **Privilege detection** | Auto-detects root and falls back gracefully for unprivileged scans |
-| **Skip discovery** | `-Pn` flag for hosts that block ping probes |
-| **Traceroute** | Hop-by-hop path display in aggressive scans |
-| **OS alternatives** | Shows multiple OS match candidates with confidence percentages |
-| **MAC vendor lookup** | Displays hardware vendor from MAC address (when on same subnet) |
-| **Port state reasons** | Shows nmap's reason for each port state (syn-ack, no-response, etc.) |
+NetScanner Pro can route scans through proxy chains using **proxychains4**, providing anonymity and allowing scans through SOCKS4, SOCKS5, or HTTP proxies.
+
+### How It Works
+
+1. Enable "Route through Proxychains" in the scan configuration
+2. Select a chain type (dynamic, strict, or random)
+3. Add one or more proxy servers (up to 10)
+4. Start your scan - traffic is routed through the proxy chain
+
+### Chain Types
+
+| Chain Type | Behavior |
+|-----------|----------|
+| **Dynamic** | Skips dead proxies, continues through the rest of the chain |
+| **Strict** | All proxies must be online; traffic flows through each in order |
+| **Random** | Rotates proxy selection per TCP connection for maximum anonymity |
+
+### Proxy Compatibility
+
+When proxychains is active, the scanner automatically adjusts for proxy constraints:
+
+| Adjustment | Reason |
+|-----------|--------|
+| Force `-sT` (TCP connect) | Raw SYN packets bypass proxies |
+| Remove `-O` (OS detection) | Requires raw packets that bypass proxies |
+| Replace `-A` with `-sV -sC --traceroute` | Aggressive mode includes OS detection |
+| Add `-Pn` (skip ping) | ICMP does not traverse TCP proxies |
+| Block ping scan | ICMP-only scan cannot be proxied |
+| Block UDP scan | UDP does not traverse TCP proxies |
+
+### Proxy Formats
+
+Each proxy entry requires:
+- **Type**: `socks5`, `socks4`, or `http`
+- **Host**: IP address or hostname of the proxy server
+- **Port**: Port number (1-65535)
+
+Common default ports: Tor (9050), SSH SOCKS (1080), HTTP proxy (8080).
 
 ---
 
@@ -200,6 +243,7 @@ Maps directly to nmap's `-T` templates:
  │  UI layout     Scan control    Dark theme     Chart.js      │
  │                NDJSON parse    Responsive     jsPDF          │
  │                5 charts                                     │
+ │                Proxychains UI                               │
  │                PDF/CSV/JSON                                 │
  └────────────────────┬────────────────────────────────────────┘
                       │ POST /api/scan (NDJSON stream)
@@ -208,10 +252,12 @@ Maps directly to nmap's `-T` templates:
  │                  Flask Backend (server.py)                   │
  │                                                             │
  │  /api/scan ──→ python-nmap ──→ nmap binary                 │
+ │            └──→ proxychains4 ──→ nmap binary (when proxied) │
  │                                                             │
  │  Flow:                                                      │
- │  1. Validate target & scan type                             │
+ │  1. Validate target, scan type, & proxy config              │
  │  2. For ranges: ping sweep → discover live hosts            │
+ │     (skipped when proxychains active)                       │
  │  3. Scan each host with requested nmap flags                │
  │  4. Parse XML output → JSON                                 │
  │  5. Stream results as NDJSON (one JSON per line)            │
@@ -222,6 +268,13 @@ Maps directly to nmap's `-T` templates:
                       │ subprocess
                       ▼
  ┌─────────────────────────────────────────────────────────────┐
+ │              proxychains4 (optional wrapper)                 │
+ │  Routes nmap TCP traffic through SOCKS/HTTP proxy chain     │
+ │  Temp config generated per-scan, cleaned up after           │
+ └────────────────────┬────────────────────────────────────────┘
+                      │
+                      ▼
+ ┌─────────────────────────────────────────────────────────────┐
  │                    nmap (system binary)                      │
  │  Performs actual network scanning, service detection,        │
  │  OS fingerprinting, vulnerability script execution           │
@@ -230,7 +283,7 @@ Maps directly to nmap's `-T` templates:
 
 ### How Streaming Works
 
-1. **Range scans**: First a quick ping sweep (`-sn`) discovers live hosts. Then each host is scanned individually with the requested flags, streaming results as they complete.
+1. **Range scans**: First a quick ping sweep (`-sn`) discovers live hosts. Then each host is scanned individually with the requested flags, streaming results as they complete. (Ping sweep is skipped when proxychains is active since ICMP doesn't traverse proxies.)
 2. **Single host scans**: nmap runs once on the target and results are streamed back.
 3. **Frontend**: Uses `ReadableStream` API to parse NDJSON line-by-line, updating the terminal, result cards, and charts in real-time.
 
@@ -240,12 +293,13 @@ Maps directly to nmap's `-T` templates:
 
 ```
 netscan.net/
-├── server.py           # Flask backend - nmap wrapper, NDJSON streaming,
-│                       #   result parsing, export, security middleware
-├── script.js           # Frontend - scan control, NDJSON parsing,
+├── server.py           # Flask backend - nmap wrapper, proxychains integration,
+│                       #   NDJSON streaming, result parsing, export, security
+├── script.js           # Frontend - scan control, NDJSON parsing, proxychains UI,
 │                       #   5 Chart.js visualizations, PDF/CSV/JSON export
-├── index.html          # UI shell - scan config, terminal, charts, results
-├── styles.css          # Dark theme, port states, vuln severity colors
+├── index.html          # UI shell - scan config, proxychains panel, terminal,
+│                       #   charts, results
+├── styles.css          # Dark theme, port states, vuln severity, proxy styles
 ├── requirements.txt    # Flask, flask-cors, python-nmap
 ├── exports/            # Server-side JSON exports (auto-cleaned)
 └── README.md           # This file
@@ -257,16 +311,18 @@ netscan.net/
 
 ### `GET /api/health`
 
-Returns server status, nmap availability, privilege level, and source IP.
+Returns server status, nmap availability, proxychains availability, privilege level, and source IP.
 
 ```json
 {
   "status": "ok",
   "service": "NetScanner Pro API",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "nmap": { "available": true, "version": "7.94", "status": "available" },
   "privileges": { "root": true, "note": "Full scan capabilities" },
-  "source_ip": "192.168.1.100"
+  "proxychains": { "available": true, "path": "proxychains4" },
+  "source_ip": "192.168.1.100",
+  "timestamp": "2025-01-15T10:30:00"
 }
 ```
 
@@ -281,23 +337,44 @@ Starts a real nmap scan. Returns NDJSON stream. Rate limited to 10/min.
   "scanType": "aggressive",
   "ports": "22,80,443",
   "timing": 4,
-  "skipDiscovery": false
+  "skipDiscovery": false,
+  "proxychains": {
+    "enabled": true,
+    "chainType": "dynamic",
+    "proxies": [
+      { "type": "socks5", "host": "127.0.0.1", "port": 9050 }
+    ]
+  }
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|:--------:|-------------|
-| `target` | string | Yes | IP, CIDR, IP range, or hostname |
+| `target` | string | Yes | IP, CIDR (/8-/32), IP range, or hostname |
 | `scanType` | string | Yes | `ping`, `quick`, `full`, `stealth`, `service`, `os`, `udp`, `vuln`, `aggressive` |
 | `ports` | string | No | Custom port spec (e.g., `22,80,443`) |
 | `timing` | int | No | 1-5 (default: 3) |
 | `skipDiscovery` | bool | No | Skip ping discovery (`-Pn`) |
+| `proxychains` | object | No | Proxychains configuration (see below) |
+
+**Proxychains object:**
+
+| Field | Type | Required | Description |
+|-------|------|:--------:|-------------|
+| `enabled` | bool | Yes | Enable proxy routing |
+| `chainType` | string | Yes | `strict`, `dynamic`, or `random` |
+| `proxies` | array | Yes | 1-10 proxy entries |
+| `proxies[].type` | string | Yes | `socks4`, `socks5`, or `http` |
+| `proxies[].host` | string | Yes | Proxy hostname or IP |
+| `proxies[].port` | int | Yes | Proxy port (1-65535) |
 
 **Response:** NDJSON stream with log messages and host results.
 
 ### `POST /api/export/json` | `POST /api/export/csv` | `POST /api/export/pdf`
 
 Export scan results. Body: `{ "results": [...], "target": "...", "scanType": "..." }`
+
+Max 1000 results per export.
 
 ### `GET /api/stats`
 
@@ -309,17 +386,20 @@ Returns supported scan types, nmap version, privilege level.
 
 | Protection | Implementation |
 |-----------|----------------|
-| **Path traversal** | Static files restricted to allowlisted extensions |
+| **Path traversal** | Static files restricted to allowlisted extensions; path normalization |
 | **Input sanitization** | Strips null bytes, control chars, injection chars; 255-char limit |
+| **nmap argument injection** | Ports validated per-number (1-65535), spaces stripped; scan type allowlisted |
 | **XSS prevention** | `textContent` for all user data in DOM; CSP blocks `unsafe-eval` |
-| **CSS class injection** | Allowlisted values for dynamic CSS classes |
-| **CSV injection** | `=+-@` prefixed values escaped on export |
+| **CSS class injection** | Allowlisted values for dynamic CSS classes (port states, severities) |
+| **CSV injection** | `=+-@\t\r` prefixed values escaped on both client and server export |
 | **Rate limiting** | 10 req/min per IP, memory-bounded (10K IPs max) |
 | **Request size** | Flask `MAX_CONTENT_LENGTH` = 1MB |
-| **Security headers** | HSTS, X-Frame-Options DENY, nosniff, Referrer-Policy |
+| **Security headers** | HSTS, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy |
 | **CSP** | Script sources restricted to self + CDN domains |
 | **CORS** | Restricted to localhost origins |
-| **nmap args** | Scan type validated against allowlist; custom ports regex-validated |
+| **Proxy validation** | Host regex enforced, port range checked, max 10 proxies, chain type allowlisted |
+| **Subprocess safety** | Timeout with process kill; no shell execution |
+| **CIDR range limit** | Minimum /8 prefix to prevent scanning the entire internet |
 
 ---
 
@@ -366,6 +446,17 @@ Without root, these scans are limited: stealth (falls back to TCP connect), OS d
 3. Reduce the target range (use /28 instead of /24)
 4. Specify only needed ports with custom ports
 5. Each host has a 300s timeout - large networks take proportionally longer
+</details>
+
+<details>
+<summary><b>Proxychains not working</b></summary>
+
+1. Verify proxychains is installed: `proxychains4 --version` or `which proxychains4`
+2. Ensure your proxy servers are running and reachable
+3. Test manually: `proxychains4 curl http://httpbin.org/ip`
+4. Ping and UDP scans cannot be proxied - use TCP-based scan types
+5. Check the terminal output for proxy-specific error messages
+6. If using Tor, ensure the Tor service is running: `sudo systemctl start tor`
 </details>
 
 <details>

@@ -14,6 +14,7 @@ from io import BytesIO
 import csv
 from functools import wraps
 from collections import defaultdict
+import shlex
 import subprocess
 import tempfile
 
@@ -85,12 +86,19 @@ def create_proxychains_config(chain_type, proxies):
     for p in proxies:
         cfg += f"{p['type']}\t{p['host']}\t{p['port']}\n"
 
-    fd = tempfile.NamedTemporaryFile(
-        mode='w', suffix='.conf', delete=False, prefix='proxychains_'
-    )
-    fd.write(cfg)
-    fd.close()
-    return fd.name
+    tmp_path = None
+    try:
+        fd = tempfile.NamedTemporaryFile(
+            mode='w', suffix='.conf', delete=False, prefix='proxychains_'
+        )
+        tmp_path = fd.name
+        fd.write(cfg)
+        fd.close()
+        return tmp_path
+    except Exception:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
 
 
 def run_nmap_scan(nm, hosts, arguments, proxy_cmd=None):
@@ -101,14 +109,22 @@ def run_nmap_scan(nm, hosts, arguments, proxy_cmd=None):
     python-nmap's native scan() method.
     """
     if proxy_cmd:
-        import shlex
         cmd = list(proxy_cmd) + ['-oX', '-'] + shlex.split(arguments)
         if hosts:
             cmd.append(hosts)
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-        stdout, stderr = proc.communicate(timeout=600)
+        try:
+            stdout, stderr = proc.communicate(timeout=600)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise RuntimeError('Proxychains/nmap scan timed out after 600s')
+        if proc.returncode not in (0, 1):
+            # nmap returns 1 for some non-fatal conditions; only fail on other codes
+            err_text = stderr.decode('utf-8', errors='replace')[:300] if stderr else ''
+            raise RuntimeError(f'nmap exited with code {proc.returncode}: {err_text}')
         nm.analyse_nmap_xml_scan(
             nmap_xml_output=stdout.decode('utf-8', errors='replace'),
             nmap_err=stderr.decode('utf-8', errors='replace')
@@ -192,7 +208,7 @@ def validate_target(target):
     elif re.match(cidr_pattern, target):
         ip, prefix = target.rsplit('/', 1)
         octets = ip.split('.')
-        return all(0 <= int(o) <= 255 for o in octets) and 0 <= int(prefix) <= 32
+        return all(0 <= int(o) <= 255 for o in octets) and 8 <= int(prefix) <= 32
     elif re.match(range_pattern, target):
         start_ip, end_ip = target.split('-')
         start_octets = start_ip.split('.')
@@ -548,7 +564,7 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False,
     # Check privilege requirements and apply fallbacks
     if scan_type in PRIVILEGED_SCANS and not IS_ROOT:
         if scan_type == 'stealth':
-            scan_args = scan_args.replace('-sS', '-sT')
+            scan_args = re.sub(r'-sS\b', '-sT', scan_args)
             yield json.dumps({
                 'type': 'log', 'level': 'WARNING',
                 'message': 'SYN stealth scan requires root. Falling back to TCP connect scan (-sT).',
@@ -586,7 +602,7 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False,
 
     yield json.dumps({
         'type': 'log', 'level': 'INFO',
-        'message': f'nmap {NMAP_VERSION} | Timing: T{timing} | Args: {scan_args}',
+        'message': f'nmap {NMAP_VERSION} | Timing: T{timing} | Type: {scan_type}',
         'color': 'cyan'
     }) + '\n'
 
@@ -878,7 +894,7 @@ def scan():
                     'error': f'Invalid proxy type "{ptype}". Must be: {", ".join(VALID_PROXY_TYPES)}'
                 }), 400
             phost = str(p.get('host', '')).strip()
-            if not phost or not re.match(r'^[a-zA-Z0-9.\-]+$', phost):
+            if not phost or not re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9.\-]*[a-zA-Z0-9])?$', phost):
                 return jsonify({'error': 'Invalid proxy host'}), 400
             try:
                 pport = int(p.get('port', 0))
