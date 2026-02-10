@@ -207,28 +207,6 @@ body::before {
     accent-color: #00ff41;
 }
 
-.ip-rotation-settings {
-    margin-top: 10px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.ip-rotation-settings label {
-    color: #888;
-    font-size: 0.85rem;
-}
-
-.ip-rotation-settings select {
-    flex: 1;
-    padding: 8px;
-    background: rgba(0, 0, 0, 0.5);
-    border: 1px solid #555;
-    border-radius: 5px;
-    color: #00ff41;
-    font-family: 'Fira Code', monospace;
-}
-
 .button-group {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -932,6 +910,102 @@ body::before {
 .hop-host {
     color: #888;
     font-size: 0.8rem;
+}
+
+/* Proxychains Configuration */
+.proxy-section {
+    border-color: #8000ff;
+}
+
+.proxy-config {
+    margin-top: 12px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #555;
+    border-radius: 5px;
+}
+
+.proxy-list-label {
+    display: block;
+    color: #00ffff;
+    font-size: 0.85rem;
+    margin-bottom: 6px;
+}
+
+.proxy-entry {
+    display: grid;
+    grid-template-columns: 100px 1fr 90px 36px;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.proxy-entry select,
+.proxy-entry input {
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #00ff41;
+    font-family: 'Fira Code', monospace;
+    font-size: 0.8rem;
+}
+
+.proxy-entry select:focus,
+.proxy-entry input:focus {
+    border-color: #8000ff;
+    outline: none;
+}
+
+.btn-remove-proxy {
+    padding: 0;
+    background: rgba(255, 85, 85, 0.2);
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #ff5555;
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-remove-proxy:hover:not(:disabled) {
+    background: rgba(255, 85, 85, 0.4);
+    border-color: #ff5555;
+}
+
+.btn-remove-proxy:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.btn-add-proxy {
+    padding: 6px 12px;
+    background: rgba(128, 0, 255, 0.15);
+    border: 1px dashed #8000ff;
+    border-radius: 4px;
+    color: #8000ff;
+    font-family: 'Fira Code', monospace;
+    font-size: 0.8rem;
+    cursor: pointer;
+    margin-top: 4px;
+    transition: all 0.2s;
+}
+
+.btn-add-proxy:hover {
+    background: rgba(128, 0, 255, 0.3);
+}
+
+.proxy-notes {
+    margin-top: 8px;
+    padding: 8px;
+    background: rgba(128, 0, 255, 0.1);
+    border-left: 3px solid #8000ff;
+    border-radius: 0 4px 4px 0;
+}
+
+.proxy-notes small {
+    color: #888;
+    font-size: 0.7rem;
+    line-height: 1.5;
 }
 
 /* Reduced Motion Support */

@@ -14,6 +14,14 @@ const scanStatusSpan = document.getElementById('scanStatus');
 const hostsFoundSpan = document.getElementById('hostsFound');
 const nmapStatusSpan = document.getElementById('nmapStatus');
 
+// Proxychains elements
+const proxychainsToggle = document.getElementById('proxychainsEnabled');
+const proxychainsConfig = document.getElementById('proxychainsConfig');
+const chainTypeSelect = document.getElementById('chainType');
+const proxyEntriesContainer = document.getElementById('proxyEntries');
+const addProxyBtn = document.getElementById('addProxy');
+const proxychainsStatusSpan = document.getElementById('proxychainsStatus');
+
 // Export Buttons
 const exportJSONBtn = document.getElementById('exportJSON');
 const exportCSVBtn = document.getElementById('exportCSV');
@@ -64,8 +72,8 @@ function setLoadingState(isLoading) {
     }
 }
 
-// API Configuration
-const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:5000/api`;
+// API Configuration - use the actual port the page was served on
+const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:${window.location.port || '5000'}/api`;
 
 // Initialize - fetch server status
 document.addEventListener('DOMContentLoaded', async () => {
@@ -92,10 +100,23 @@ document.addEventListener('DOMContentLoaded', async () => {
                     nmapStatusSpan.className = 'status-value nmap-error';
                 }
             }
+            // Display proxychains status
+            if (proxychainsStatusSpan) {
+                if (health.proxychains?.available) {
+                    proxychainsStatusSpan.textContent = health.proxychains.path || 'Available';
+                    proxychainsStatusSpan.className = 'status-value nmap-ok';
+                } else {
+                    proxychainsStatusSpan.textContent = 'NOT INSTALLED';
+                    proxychainsStatusSpan.className = 'status-value nmap-error';
+                    if (proxychainsToggle) proxychainsToggle.disabled = true;
+                }
+            }
+
             // Log startup info
+            const proxyStatus = health.proxychains?.available ? 'proxychains ready' : 'no proxychains';
             addTerminalLine('INFO',
                 `Connected to backend. nmap ${health.nmap?.available ? 'v' + health.nmap.version : 'NOT FOUND'}` +
-                ` | ${health.privileges?.root ? 'root' : 'unprivileged'}`, 'green');
+                ` | ${health.privileges?.root ? 'root' : 'unprivileged'} | ${proxyStatus}`, 'green');
             if (!health.nmap?.available) {
                 addTerminalLine('ERROR', 'nmap is not installed. Install: sudo apt install nmap', 'red');
             } else if (!health.privileges?.root) {
@@ -128,6 +149,81 @@ document.addEventListener('keydown', (e) => {
         stopScan();
     }
 });
+
+// Proxychains toggle
+if (proxychainsToggle) {
+    proxychainsToggle.addEventListener('change', () => {
+        if (proxychainsConfig) {
+            proxychainsConfig.style.display = proxychainsToggle.checked ? 'block' : 'none';
+        }
+    });
+}
+
+// Add proxy entry
+if (addProxyBtn) {
+    addProxyBtn.addEventListener('click', () => {
+        const entries = proxyEntriesContainer.querySelectorAll('.proxy-entry');
+        if (entries.length >= 10) return; // Max 10 proxies
+
+        const entry = document.createElement('div');
+        entry.className = 'proxy-entry';
+        entry.innerHTML = `
+            <select class="proxy-type">
+                <option value="socks5" selected>SOCKS5</option>
+                <option value="socks4">SOCKS4</option>
+                <option value="http">HTTP</option>
+            </select>
+            <input type="text" class="proxy-host" placeholder="127.0.0.1" maxlength="253">
+            <input type="number" class="proxy-port" placeholder="9050" min="1" max="65535">
+            <button class="btn-remove-proxy" title="Remove proxy">&times;</button>
+        `;
+        proxyEntriesContainer.appendChild(entry);
+        updateRemoveButtons();
+    });
+}
+
+// Remove proxy entry (event delegation)
+if (proxyEntriesContainer) {
+    proxyEntriesContainer.addEventListener('click', (e) => {
+        if (e.target.classList.contains('btn-remove-proxy') && !e.target.disabled) {
+            e.target.closest('.proxy-entry').remove();
+            updateRemoveButtons();
+        }
+    });
+}
+
+function updateRemoveButtons() {
+    const entries = proxyEntriesContainer?.querySelectorAll('.proxy-entry') || [];
+    entries.forEach(entry => {
+        const btn = entry.querySelector('.btn-remove-proxy');
+        if (btn) btn.disabled = entries.length <= 1;
+    });
+}
+
+function getProxyConfig() {
+    if (!proxychainsToggle?.checked) return null;
+
+    const entries = proxyEntriesContainer?.querySelectorAll('.proxy-entry') || [];
+    const proxies = [];
+
+    entries.forEach(entry => {
+        const type = entry.querySelector('.proxy-type')?.value || 'socks5';
+        const host = entry.querySelector('.proxy-host')?.value.trim();
+        const port = parseInt(entry.querySelector('.proxy-port')?.value);
+
+        if (host && port && port >= 1 && port <= 65535) {
+            proxies.push({ type, host, port });
+        }
+    });
+
+    if (proxies.length === 0) return null;
+
+    return {
+        enabled: true,
+        chainType: chainTypeSelect?.value || 'dynamic',
+        proxies
+    };
+}
 
 // Input validation visual feedback
 targetIPInput.addEventListener('input', () => {
@@ -178,6 +274,13 @@ async function startScan() {
         return;
     }
 
+    // Validate proxychains config
+    const proxyConfig = getProxyConfig();
+    if (proxychainsToggle?.checked && !proxyConfig) {
+        addTerminalLine('ERROR', 'Proxychains enabled but no valid proxies configured. Add at least one proxy (host + port).', 'red');
+        return;
+    }
+
     isScanning = true;
     scanAbortController = new AbortController();
 
@@ -192,19 +295,25 @@ async function startScan() {
     scanResults = [];
     resultsContainer.innerHTML = '';
 
-    addTerminalLine('INFO', `Starting ${scanType.toUpperCase()} scan on ${target}`, 'cyan');
+    const proxyLabel = proxyConfig ? ` via proxychains (${proxyConfig.chainType})` : '';
+    addTerminalLine('INFO', `Starting ${scanType.toUpperCase()} scan on ${target}${proxyLabel}`, 'cyan');
 
     try {
+        const requestBody = {
+            target: target,
+            scanType: scanType,
+            ports: ports,
+            timing: timing,
+            skipDiscovery: skipDiscovery
+        };
+        if (proxyConfig) {
+            requestBody.proxychains = proxyConfig;
+        }
+
         const response = await fetch(`${API_BASE_URL}/scan`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                target: target,
-                scanType: scanType,
-                ports: ports,
-                timing: timing,
-                skipDiscovery: skipDiscovery
-            }),
+            body: JSON.stringify(requestBody),
             signal: scanAbortController.signal
         });
 
@@ -335,8 +444,9 @@ function displayHostResult(host) {
             <tbody>
                 ${host.ports.map(port => {
                     const validStates = ['open', 'filtered', 'closed', 'open|filtered', 'closed|filtered'];
-                    const stateClass = port.state === 'open' ? 'open' :
-                                       port.state === 'closed' ? 'closed' : 'filtered';
+                    const safeState = validStates.includes(port.state) ? port.state : 'filtered';
+                    const stateClass = safeState === 'open' ? 'open' :
+                                       safeState === 'closed' ? 'closed' : 'filtered';
                     return `<tr>
                         <td>${sanitizeHTML(String(port.port))}</td>
                         <td><span class="port-state-${stateClass}">${sanitizeHTML(port.state)}</span></td>
@@ -408,6 +518,13 @@ function addTerminalLine(level, message, color = 'cyan') {
     line.appendChild(messageSpan);
 
     terminal.appendChild(line);
+
+    // Limit terminal lines to prevent memory leak during long scans
+    const MAX_TERMINAL_LINES = 500;
+    while (terminal.children.length > MAX_TERMINAL_LINES) {
+        terminal.removeChild(terminal.firstChild);
+    }
+
     terminal.scrollTop = terminal.scrollHeight;
 }
 
@@ -500,7 +617,7 @@ function updateNetworkMap() {
     const upData = hostsUp.map((h, i) => ({
         x: i,
         y: h.ports?.length || 0,
-        r: Math.max(5, Math.min(25, parseInt(h.latency) || 8)),
+        r: Math.max(5, Math.min(25, (h.ports?.length || 1) * 3)),
         label: h.ip
     }));
     const downData = hostsDown.map((h, i) => ({
@@ -765,9 +882,14 @@ function exportJSON() {
 }
 
 function sanitizeCSVValue(val) {
-    const str = String(val ?? '');
+    let str = String(val ?? '');
+    // Prevent CSV injection
     if (/^[=+\-@\t\r]/.test(str)) {
-        return "'" + str;
+        str = "'" + str;
+    }
+    // RFC 4180: escape quotes and wrap in quotes if contains comma, quote, or newline
+    if (/[",\n\r]/.test(str)) {
+        str = '"' + str.replace(/"/g, '""') + '"';
     }
     return str;
 }
@@ -782,11 +904,16 @@ function exportCSV() {
 
     scanResults.forEach(host => {
         const ports = host.ports ? host.ports.map(p => `${p.port}/${p.protocol || 'tcp'}`).join(';') : '';
-        const services = host.ports ? host.ports.map(p => sanitizeCSVValue(p.service)).join(';') : '';
-        const versions = host.ports ? host.ports.map(p => sanitizeCSVValue(p.version || '')).join(';') : '';
-        const vulns = host.vulnerabilities ? host.vulnerabilities.map(v => sanitizeCSVValue(v.cve)).join(';') : '';
+        const services = host.ports ? host.ports.map(p => p.service || 'unknown').join(';') : '';
+        const versions = host.ports ? host.ports.map(p => p.version || '').join(';') : '';
+        const vulns = host.vulnerabilities ? host.vulnerabilities.map(v => v.cve || '').join(';') : '';
 
-        csv += `${sanitizeCSVValue(host.ip)},${sanitizeCSVValue(host.status)},${sanitizeCSVValue(host.hostname || 'N/A')},${sanitizeCSVValue(host.os || 'N/A')},${sanitizeCSVValue(host.mac || 'N/A')},${sanitizeCSVValue(host.vendor || 'N/A')},"${sanitizeCSVValue(ports)}","${sanitizeCSVValue(services)}","${sanitizeCSVValue(versions)}","${sanitizeCSVValue(vulns)}"\n`;
+        const fields = [
+            host.ip || '', host.status || '', host.hostname || 'N/A',
+            host.os || 'N/A', host.mac || 'N/A', host.vendor || 'N/A',
+            ports, services, versions, vulns
+        ];
+        csv += fields.map(f => sanitizeCSVValue(f)).join(',') + '\n';
     });
 
     const blob = new Blob([csv], { type: 'text/csv' });

@@ -14,6 +14,8 @@ from io import BytesIO
 import csv
 from functools import wraps
 from collections import defaultdict
+import subprocess
+import tempfile
 
 # Get the directory where server.py is located
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -49,12 +51,70 @@ def check_nmap():
         nm = nmap.PortScanner()
         version = nm.nmap_version()
         return True, f'{version[0]}.{version[1]}', 'available'
-    except Exception as e:
-        return False, None, str(e)
+    except Exception:
+        return False, None, 'nmap initialization failed'
 
 
 NMAP_AVAILABLE, NMAP_VERSION, NMAP_STATUS = check_nmap()
 IS_ROOT = os.geteuid() == 0 if hasattr(os, 'geteuid') else False
+
+
+# ── Proxychains Configuration ────────────────────────────────────────────
+
+def check_proxychains():
+    """Check if proxychains4 or proxychains is installed."""
+    for cmd in ['proxychains4', 'proxychains']:
+        path = shutil.which(cmd)
+        if path:
+            return path
+    return None
+
+
+PROXYCHAINS_PATH = check_proxychains()
+VALID_CHAIN_TYPES = {'strict', 'dynamic', 'random'}
+VALID_PROXY_TYPES = {'socks4', 'socks5', 'http'}
+
+
+def create_proxychains_config(chain_type, proxies):
+    """Create a temporary proxychains config file. Returns path to config."""
+    cfg = f"{chain_type}_chain\n"
+    cfg += "proxy_dns\n"
+    cfg += "tcp_read_time_out 15000\n"
+    cfg += "tcp_connect_time_out 8000\n\n"
+    cfg += "[ProxyList]\n"
+    for p in proxies:
+        cfg += f"{p['type']}\t{p['host']}\t{p['port']}\n"
+
+    fd = tempfile.NamedTemporaryFile(
+        mode='w', suffix='.conf', delete=False, prefix='proxychains_'
+    )
+    fd.write(cfg)
+    fd.close()
+    return fd.name
+
+
+def run_nmap_scan(nm, hosts, arguments, proxy_cmd=None):
+    """Execute nmap scan, optionally routed through proxychains.
+
+    When proxy_cmd is provided, runs nmap via subprocess through proxychains
+    and feeds the XML output to python-nmap's parser. Otherwise uses
+    python-nmap's native scan() method.
+    """
+    if proxy_cmd:
+        import shlex
+        cmd = list(proxy_cmd) + ['-oX', '-'] + shlex.split(arguments)
+        if hosts:
+            cmd.append(hosts)
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        stdout, stderr = proc.communicate(timeout=600)
+        nm.analyse_nmap_xml_scan(
+            nmap_xml_output=stdout.decode('utf-8', errors='replace'),
+            nmap_err=stderr.decode('utf-8', errors='replace')
+        )
+    else:
+        nm.scan(hosts=hosts, arguments=arguments)
 
 # Scan type → nmap arguments
 SCAN_ARGUMENTS = {
@@ -76,14 +136,16 @@ VALID_SCAN_TYPES = list(SCAN_ARGUMENTS.keys())
 
 def get_local_ip():
     """Get the primary local IP address."""
+    s = None
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8', 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        return s.getsockname()[0]
     except Exception:
         return '127.0.0.1'
+    finally:
+        if s:
+            s.close()
 
 
 # ── Static File Serving ───────────────────────────────────────────────────
@@ -95,12 +157,14 @@ def serve_index():
 
 @app.route('/<path:filename>')
 def serve_static(filename):
-    if '..' in filename or filename.startswith('/'):
+    # Normalize and validate path to prevent traversal
+    normalized = os.path.normpath(filename)
+    if '..' in normalized or normalized.startswith('/') or normalized.startswith('\\'):
         abort(403)
-    ext = os.path.splitext(filename)[1].lower()
+    ext = os.path.splitext(normalized)[1].lower()
     if ext not in ALLOWED_STATIC_EXTENSIONS:
         abort(403)
-    return send_from_directory(BASE_DIR, filename)
+    return send_from_directory(BASE_DIR, normalized)
 
 
 # ── Security ──────────────────────────────────────────────────────────────
@@ -142,7 +206,8 @@ def validate_target(target):
 
 def convert_target_for_nmap(target):
     """Convert IP range format to nmap-compatible format."""
-    if '-' not in target or '/' in target:
+    # Only convert if it looks like an IP range (not a hostname with hyphens)
+    if '/' in target or not re.match(r'^(\d{1,3}\.){3}\d{1,3}-', target):
         return target
 
     parts = target.split('-', 1)
@@ -199,7 +264,7 @@ def rate_limit(f):
 def add_security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['X-XSS-Protection'] = '0'
     response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
@@ -390,7 +455,8 @@ def parse_host_result(nm, host, scan_type):
     return host_data
 
 
-def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
+def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False,
+              proxy_config=None):
     """Perform real nmap scan and yield NDJSON results."""
     if not NMAP_AVAILABLE:
         yield json.dumps({
@@ -406,6 +472,79 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
     nmap_target = convert_target_for_nmap(target)
     scan_args = build_nmap_args(scan_type, timing, ports, skip_discovery)
 
+    # ── Proxychains setup ──
+    use_proxy = bool(proxy_config and proxy_config.get('enabled') and PROXYCHAINS_PATH)
+    proxy_cmd = None
+    config_path = None
+
+    if use_proxy:
+        # Create proxychains config file
+        proxies = proxy_config.get('proxies', [])
+        chain_type = proxy_config.get('chainType', 'strict')
+        config_path = create_proxychains_config(chain_type, proxies)
+
+        # Build the proxychains command prefix
+        proxy_cmd = [PROXYCHAINS_PATH]
+        if 'proxychains4' in os.path.basename(PROXYCHAINS_PATH):
+            proxy_cmd.append('-q')  # Quiet mode (suppress banner)
+        proxy_cmd += ['-f', config_path, 'nmap']
+
+        proxy_desc = f'{chain_type} chain, {len(proxies)} proxy(s)'
+        yield json.dumps({
+            'type': 'log', 'level': 'INFO',
+            'message': f'Proxychains ENABLED: {proxy_desc}',
+            'color': 'yellow'
+        }) + '\n'
+
+        # Proxychains only works with TCP connections, apply restrictions:
+        if scan_type == 'ping':
+            yield json.dumps({
+                'type': 'log', 'level': 'ERROR',
+                'message': 'Ping scan uses ICMP which cannot be proxied. Use a TCP scan type instead.',
+                'color': 'red'
+            }) + '\n'
+            if config_path:
+                os.unlink(config_path)
+            return
+
+        if scan_type == 'udp':
+            yield json.dumps({
+                'type': 'log', 'level': 'ERROR',
+                'message': 'UDP scan cannot be routed through proxychains (TCP proxies only).',
+                'color': 'red'
+            }) + '\n'
+            if config_path:
+                os.unlink(config_path)
+            return
+
+        # Force TCP connect scan (SYN/raw packets bypass proxychains)
+        scan_args = re.sub(r'-sS\b', '-sT', scan_args)
+        if '-sT' not in scan_args and '-sn' not in scan_args:
+            scan_args += ' -sT'
+
+        # Remove OS detection (requires raw packets, bypasses proxy)
+        scan_args = re.sub(r'-O\b\s*', '', scan_args)
+
+        # Replace -A with TCP-compatible subset
+        scan_args = re.sub(r'-A\b', '-sV -sC --traceroute', scan_args)
+
+        # Force skip host discovery (ICMP doesn't go through proxy)
+        if '-Pn' not in scan_args:
+            scan_args += ' -Pn'
+            yield json.dumps({
+                'type': 'log', 'level': 'INFO',
+                'message': 'Auto-added -Pn (ICMP ping does not traverse proxies)',
+                'color': 'yellow'
+            }) + '\n'
+
+        # Warn about limitations
+        if scan_type in ('os', 'aggressive', 'stealth'):
+            yield json.dumps({
+                'type': 'log', 'level': 'WARNING',
+                'message': f'{scan_type.upper()} scan modified for proxy compatibility (TCP connect only, no OS detection).',
+                'color': 'yellow'
+            }) + '\n'
+
     # Check privilege requirements and apply fallbacks
     if scan_type in PRIVILEGED_SCANS and not IS_ROOT:
         if scan_type == 'stealth':
@@ -416,7 +555,8 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
                 'color': 'yellow'
             }) + '\n'
         elif scan_type == 'os':
-            scan_args = scan_args.replace('-O ', '')
+            # Remove -O flag (handles both mid-string and end-of-string)
+            scan_args = re.sub(r'-O\b\s*', '', scan_args)
             yield json.dumps({
                 'type': 'log', 'level': 'WARNING',
                 'message': 'OS detection requires root. Running service detection only.',
@@ -430,7 +570,8 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
             }) + '\n'
             return
         elif scan_type == 'aggressive':
-            scan_args = scan_args.replace('-A', '-sV -sC --traceroute')
+            # Replace -A flag precisely (word boundary prevents partial matches)
+            scan_args = re.sub(r'-A\b', '-sV -sC --traceroute', scan_args)
             yield json.dumps({
                 'type': 'log', 'level': 'WARNING',
                 'message': 'Aggressive scan limited without root (no OS detection, no SYN scan).',
@@ -449,10 +590,17 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
         'color': 'cyan'
     }) + '\n'
 
-    try:
-        is_range = '/' in target or '-' in target
+    scan_start_time = time.time()
 
-        if is_range and scan_type != 'ping' and not skip_discovery:
+    try:
+        is_range = bool(
+            re.match(r'^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$', target) or
+            re.match(r'^(\d{1,3}\.){3}\d{1,3}-', target)
+        )
+
+        # When proxychains is active, skip two-phase ping sweep
+        # (ICMP doesn't traverse proxies; -Pn is already forced)
+        if is_range and scan_type != 'ping' and not skip_discovery and not use_proxy:
             # Phase 1: Host discovery via ping sweep
             yield json.dumps({
                 'type': 'log', 'level': 'INFO',
@@ -460,7 +608,8 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
                 'color': 'yellow'
             }) + '\n'
 
-            nm.scan(hosts=nmap_target, arguments=f'-sn -T{timing} --host-timeout 60s')
+            run_nmap_scan(nm, nmap_target,
+                          f'-sn -T{timing} --host-timeout 60s')
             live_hosts = [h for h in nm.all_hosts() if nm[h].state() == 'up']
 
             yield json.dumps({
@@ -493,7 +642,7 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
                 }) + '\n'
 
                 try:
-                    nm.scan(hosts=host_ip, arguments=scan_args)
+                    run_nmap_scan(nm, host_ip, scan_args, proxy_cmd)
 
                     if host_ip in nm.all_hosts():
                         host_data = parse_host_result(nm, host_ip, scan_type)
@@ -527,14 +676,14 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
                         'color': 'red'
                     }) + '\n'
 
-            elapsed = nm.scanstats().get('elapsed', '?')
+            elapsed = round(time.time() - scan_start_time, 1)
             summary = f'Scan complete. {len(live_hosts)} host(s) scanned.'
             if vuln_count > 0:
                 summary += f' {vuln_count} vulnerabilities found!'
             summary += f' Duration: {elapsed}s'
 
         else:
-            # Single host, ping scan, or skip-discovery scan
+            # Single host, ping scan, skip-discovery, or proxychains range scan
             yield json.dumps({
                 'type': 'log', 'level': 'INFO',
                 'message': f'Scanning {target}...',
@@ -542,9 +691,10 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
             }) + '\n'
 
             if scan_type == 'ping':
-                nm.scan(hosts=nmap_target, arguments=f'-sn -T{timing} --host-timeout 60s')
+                run_nmap_scan(nm, nmap_target,
+                              f'-sn -T{timing} --host-timeout 60s')
             else:
-                nm.scan(hosts=nmap_target, arguments=scan_args)
+                run_nmap_scan(nm, nmap_target, scan_args, proxy_cmd)
 
             hosts = nm.all_hosts()
             vuln_count = 0
@@ -571,7 +721,7 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
                     'color': 'yellow'
                 }) + '\n'
 
-            elapsed = nm.scanstats().get('elapsed', '?')
+            elapsed = round(time.time() - scan_start_time, 1)
             summary = f'Scan complete. {len(hosts)} host(s) scanned.'
             if vuln_count > 0:
                 summary += f' {vuln_count} vulnerabilities found!'
@@ -602,6 +752,13 @@ def nmap_scan(target, scan_type, ports=None, timing=3, skip_discovery=False):
             'message': f'Scan error: {str(e)[:300]}',
             'color': 'red'
         }) + '\n'
+    finally:
+        # Clean up temporary proxychains config
+        if config_path and os.path.exists(config_path):
+            try:
+                os.unlink(config_path)
+            except OSError:
+                pass
 
 
 # ── Helper Functions ──────────────────────────────────────────────────────
@@ -610,7 +767,8 @@ def cleanup_old_exports():
     """Remove oldest export files if over the limit."""
     try:
         files = sorted(
-            [os.path.join(EXPORTS_DIR, f) for f in os.listdir(EXPORTS_DIR)],
+            [os.path.join(EXPORTS_DIR, f) for f in os.listdir(EXPORTS_DIR)
+             if f.endswith('.json')],
             key=os.path.getmtime
         )
         while len(files) > MAX_EXPORT_FILES:
@@ -626,7 +784,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'service': 'NetScanner Pro API',
-        'version': '3.0.0',
+        'version': '3.1.0',
         'nmap': {
             'available': NMAP_AVAILABLE,
             'version': NMAP_VERSION,
@@ -635,6 +793,10 @@ def health_check():
         'privileges': {
             'root': IS_ROOT,
             'note': 'Full scan capabilities' if IS_ROOT else 'Limited (stealth/OS/UDP require root)'
+        },
+        'proxychains': {
+            'available': PROXYCHAINS_PATH is not None,
+            'path': os.path.basename(PROXYCHAINS_PATH) if PROXYCHAINS_PATH else None,
         },
         'source_ip': get_local_ip(),
         'timestamp': datetime.now().isoformat()
@@ -669,13 +831,74 @@ def scan():
             'error': f'Invalid scan type. Must be one of: {", ".join(VALID_SCAN_TYPES)}'
         }), 400
 
-    # Validate custom ports format
-    if ports and not re.match(r'^[\d,\-\s]+$', ports):
-        return jsonify({'error': 'Invalid port format. Use: 22,80,443 or 1-1000'}), 400
+    # Validate custom ports format (no spaces - prevents nmap argument injection)
+    if ports:
+        ports = ports.replace(' ', '')
+        if not re.match(r'^[\d,\-]+$', ports):
+            return jsonify({'error': 'Invalid port format. Use: 22,80,443 or 1-1000'}), 400
+        # Validate individual port numbers are in range
+        for part in ports.split(','):
+            if not part:
+                continue
+            try:
+                if '-' in part:
+                    start, end = part.split('-', 1)
+                    if not (1 <= int(start) <= 65535 and 1 <= int(end) <= 65535):
+                        return jsonify({'error': 'Port numbers must be between 1 and 65535'}), 400
+                else:
+                    if not (1 <= int(part) <= 65535):
+                        return jsonify({'error': 'Port numbers must be between 1 and 65535'}), 400
+            except ValueError:
+                return jsonify({'error': 'Invalid port format. Use: 22,80,443 or 1-1000'}), 400
+
+    # Validate proxychains configuration
+    proxy_config = None
+    pc = data.get('proxychains')
+    if pc and pc.get('enabled'):
+        if not PROXYCHAINS_PATH:
+            return jsonify({'error': 'proxychains is not installed on the server'}), 400
+
+        chain_type = sanitize_input(pc.get('chainType', 'strict'))
+        if chain_type not in VALID_CHAIN_TYPES:
+            return jsonify({
+                'error': f'Invalid chain type. Must be one of: {", ".join(VALID_CHAIN_TYPES)}'
+            }), 400
+
+        proxies = pc.get('proxies', [])
+        if not proxies or not isinstance(proxies, list):
+            return jsonify({'error': 'At least one proxy is required'}), 400
+
+        validated_proxies = []
+        for p in proxies[:10]:  # Max 10 proxies
+            if not isinstance(p, dict):
+                return jsonify({'error': 'Invalid proxy format'}), 400
+            ptype = str(p.get('type', ''))
+            if ptype not in VALID_PROXY_TYPES:
+                return jsonify({
+                    'error': f'Invalid proxy type "{ptype}". Must be: {", ".join(VALID_PROXY_TYPES)}'
+                }), 400
+            phost = str(p.get('host', '')).strip()
+            if not phost or not re.match(r'^[a-zA-Z0-9.\-]+$', phost):
+                return jsonify({'error': 'Invalid proxy host'}), 400
+            try:
+                pport = int(p.get('port', 0))
+                if not (1 <= pport <= 65535):
+                    raise ValueError
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Proxy port must be between 1 and 65535'}), 400
+            validated_proxies.append({
+                'type': ptype, 'host': phost, 'port': pport
+            })
+
+        proxy_config = {
+            'enabled': True,
+            'chainType': chain_type,
+            'proxies': validated_proxies,
+        }
 
     def generate():
         for result in nmap_scan(target, scan_type, ports if ports else None,
-                                timing, skip_discovery):
+                                timing, skip_discovery, proxy_config):
             yield result
 
     return Response(generate(), mimetype='application/x-ndjson')
@@ -702,13 +925,15 @@ def export_json():
     results = data.get('results', [])
     if not isinstance(results, list) or len(results) > 1000:
         return jsonify({'error': 'Invalid or too many results (max 1000)'}), 400
+    # Validate each result is a dict with expected fields
+    validated_results = [r for r in results if isinstance(r, dict) and 'ip' in r]
 
     export_data = {
         'timestamp': datetime.now().isoformat(),
         'target': sanitize_input(data.get('target', 'N/A')),
         'scanType': sanitize_input(data.get('scanType', 'N/A')),
-        'totalHosts': len(results),
-        'results': results
+        'totalHosts': len(validated_results),
+        'results': validated_results
     }
 
     cleanup_old_exports()
@@ -729,6 +954,10 @@ def export_csv():
     if not data or 'results' not in data:
         return jsonify({'error': 'No results to export'}), 400
 
+    results = data.get('results', [])
+    if not isinstance(results, list) or len(results) > 1000:
+        return jsonify({'error': 'Invalid or too many results (max 1000)'}), 400
+
     output = BytesIO()
     writer = csv.writer(output, lineterminator='\n')
     writer.writerow([
@@ -736,19 +965,40 @@ def export_csv():
         'Open Ports', 'Services', 'Versions', 'Vulnerabilities'
     ])
 
+    def sanitize_csv_value(val):
+        """Prevent CSV injection by prefixing formula-trigger characters."""
+        s = str(val) if val is not None else ''
+        if s and s[0] in ('=', '+', '-', '@', '\t', '\r'):
+            return "'" + s
+        return s
+
     for host in data.get('results', []):
+        if not isinstance(host, dict):
+            continue
         ports_str = ';'.join([
             str(p.get('port', '')) + '/' + p.get('protocol', 'tcp')
-            for p in host.get('ports', [])
+            for p in host.get('ports', []) if isinstance(p, dict)
         ])
-        services_str = ';'.join([p.get('service', 'unknown') for p in host.get('ports', [])])
-        versions_str = ';'.join([p.get('version', '') or '' for p in host.get('ports', [])])
-        vulns_str = ';'.join([v.get('cve', '') for v in host.get('vulnerabilities', [])])
+        services_str = ';'.join([
+            sanitize_csv_value(p.get('service', 'unknown'))
+            for p in host.get('ports', []) if isinstance(p, dict)
+        ])
+        versions_str = ';'.join([
+            sanitize_csv_value(p.get('version', '') or '')
+            for p in host.get('ports', []) if isinstance(p, dict)
+        ])
+        vulns_str = ';'.join([
+            sanitize_csv_value(v.get('cve', ''))
+            for v in host.get('vulnerabilities', []) if isinstance(v, dict)
+        ])
 
         writer.writerow([
-            host.get('ip', ''), host.get('status', ''),
-            host.get('hostname', 'N/A'), host.get('os', 'N/A'),
-            host.get('mac', 'N/A'), host.get('vendor', 'N/A'),
+            sanitize_csv_value(host.get('ip', '')),
+            sanitize_csv_value(host.get('status', '')),
+            sanitize_csv_value(host.get('hostname', 'N/A')),
+            sanitize_csv_value(host.get('os', 'N/A')),
+            sanitize_csv_value(host.get('mac', 'N/A')),
+            sanitize_csv_value(host.get('vendor', 'N/A')),
             ports_str, services_str, versions_str, vulns_str
         ])
 
@@ -770,6 +1020,10 @@ def export_pdf():
     if not data or 'results' not in data:
         return jsonify({'error': 'No results to export'}), 400
 
+    results = data.get('results', [])
+    if not isinstance(results, list) or len(results) > 1000:
+        return jsonify({'error': 'Invalid or too many results (max 1000)'}), 400
+
     return jsonify({
         'success': True,
         'message': 'PDF generation handled client-side with jsPDF',
@@ -777,25 +1031,28 @@ def export_pdf():
             'timestamp': datetime.now().isoformat(),
             'target': sanitize_input(data.get('target', 'N/A')),
             'scanType': sanitize_input(data.get('scanType', 'N/A')),
-            'results': data.get('results', [])
+            'totalHosts': len(results),
         }
     })
 
 
 if __name__ == '__main__':
     print('=' * 60)
-    print('  NetScanner Pro v3.0 - Real Network Scanner')
+    print('  NetScanner Pro v3.1 - Real Network Scanner')
     print('=' * 60)
-    print(f'  nmap:       {"v" + NMAP_VERSION if NMAP_AVAILABLE else "NOT INSTALLED"}')
-    print(f'  Privileges: {"root (full capabilities)" if IS_ROOT else "unprivileged (limited)"}')
-    print(f'  Source IP:  {get_local_ip()}')
-    print(f'  Scan types: {", ".join(VALID_SCAN_TYPES)}')
+    print(f'  nmap:        {"v" + NMAP_VERSION if NMAP_AVAILABLE else "NOT INSTALLED"}')
+    print(f'  proxychains: {os.path.basename(PROXYCHAINS_PATH) if PROXYCHAINS_PATH else "NOT INSTALLED"}')
+    print(f'  Privileges:  {"root (full capabilities)" if IS_ROOT else "unprivileged (limited)"}')
+    print(f'  Source IP:   {get_local_ip()}')
+    print(f'  Scan types:  {", ".join(VALID_SCAN_TYPES)}')
     print('-' * 60)
     if not NMAP_AVAILABLE:
         print('  WARNING: nmap not found! Install: sudo apt install nmap')
     if not IS_ROOT:
         print('  NOTE: Run with sudo for full capabilities')
         print('  Limited without root: stealth, OS, UDP, aggressive')
+    if not PROXYCHAINS_PATH:
+        print('  NOTE: proxychains not found. Install: sudo apt install proxychains4')
     print('-' * 60)
     print('  LEGAL: Only scan networks you own or have permission to test')
     print('=' * 60)
