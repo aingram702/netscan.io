@@ -50,6 +50,10 @@
                     <span id="nmapStatus" class="status-value nmap-ok">checking...</span>
                 </span>
                 <span class="status-item">
+                    <span class="status-label">Proxychains:</span>
+                    <span id="proxychainsStatus" class="status-value nmap-warn">checking...</span>
+                </span>
+                <span class="status-item">
                     <span class="status-label">Status:</span>
                     <span id="scanStatus" class="status-value status-idle">IDLE</span>
                 </span>
@@ -111,6 +115,46 @@
                         <span>Skip Host Discovery (-Pn)</span>
                     </label>
                     <small class="input-help">Treat all hosts as online. Use when hosts block ping probes.</small>
+                </div>
+
+                <!-- Proxychains Configuration -->
+                <div class="checkbox-group proxy-section">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="proxychainsEnabled">
+                        <span>Route through Proxychains</span>
+                    </label>
+                    <small class="input-help">Route scans through SOCKS/HTTP proxies. Requires proxychains4 on server.</small>
+
+                    <div id="proxychainsConfig" class="proxy-config" style="display: none;">
+                        <div class="input-group">
+                            <label for="chainType">Chain Type:</label>
+                            <select id="chainType">
+                                <option value="dynamic" selected>Dynamic (skip dead proxies)</option>
+                                <option value="strict">Strict (all proxies in order)</option>
+                                <option value="random">Random (rotate per connection)</option>
+                            </select>
+                        </div>
+
+                        <label class="proxy-list-label">Proxy List:</label>
+                        <div id="proxyEntries">
+                            <div class="proxy-entry">
+                                <select class="proxy-type">
+                                    <option value="socks5" selected>SOCKS5</option>
+                                    <option value="socks4">SOCKS4</option>
+                                    <option value="http">HTTP</option>
+                                </select>
+                                <input type="text" class="proxy-host" placeholder="127.0.0.1" maxlength="253">
+                                <input type="number" class="proxy-port" placeholder="9050" min="1" max="65535">
+                                <button class="btn-remove-proxy" title="Remove proxy" disabled>&times;</button>
+                            </div>
+                        </div>
+                        <button id="addProxy" class="btn btn-small btn-add-proxy">+ Add Proxy</button>
+
+                        <div class="proxy-notes">
+                            <small>TCP scans only. SYN/UDP/ICMP bypass proxies.<br>
+                            Random chain rotates proxy per connection for anonymity.</small>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="button-group">

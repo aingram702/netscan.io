@@ -14,6 +14,14 @@ const scanStatusSpan = document.getElementById('scanStatus');
 const hostsFoundSpan = document.getElementById('hostsFound');
 const nmapStatusSpan = document.getElementById('nmapStatus');
 
+// Proxychains elements
+const proxychainsToggle = document.getElementById('proxychainsEnabled');
+const proxychainsConfig = document.getElementById('proxychainsConfig');
+const chainTypeSelect = document.getElementById('chainType');
+const proxyEntriesContainer = document.getElementById('proxyEntries');
+const addProxyBtn = document.getElementById('addProxy');
+const proxychainsStatusSpan = document.getElementById('proxychainsStatus');
+
 // Export Buttons
 const exportJSONBtn = document.getElementById('exportJSON');
 const exportCSVBtn = document.getElementById('exportCSV');
@@ -92,10 +100,23 @@ document.addEventListener('DOMContentLoaded', async () => {
                     nmapStatusSpan.className = 'status-value nmap-error';
                 }
             }
+            // Display proxychains status
+            if (proxychainsStatusSpan) {
+                if (health.proxychains?.available) {
+                    proxychainsStatusSpan.textContent = health.proxychains.path || 'Available';
+                    proxychainsStatusSpan.className = 'status-value nmap-ok';
+                } else {
+                    proxychainsStatusSpan.textContent = 'NOT INSTALLED';
+                    proxychainsStatusSpan.className = 'status-value nmap-error';
+                    if (proxychainsToggle) proxychainsToggle.disabled = true;
+                }
+            }
+
             // Log startup info
+            const proxyStatus = health.proxychains?.available ? 'proxychains ready' : 'no proxychains';
             addTerminalLine('INFO',
                 `Connected to backend. nmap ${health.nmap?.available ? 'v' + health.nmap.version : 'NOT FOUND'}` +
-                ` | ${health.privileges?.root ? 'root' : 'unprivileged'}`, 'green');
+                ` | ${health.privileges?.root ? 'root' : 'unprivileged'} | ${proxyStatus}`, 'green');
             if (!health.nmap?.available) {
                 addTerminalLine('ERROR', 'nmap is not installed. Install: sudo apt install nmap', 'red');
             } else if (!health.privileges?.root) {
@@ -128,6 +149,81 @@ document.addEventListener('keydown', (e) => {
         stopScan();
     }
 });
+
+// Proxychains toggle
+if (proxychainsToggle) {
+    proxychainsToggle.addEventListener('change', () => {
+        if (proxychainsConfig) {
+            proxychainsConfig.style.display = proxychainsToggle.checked ? 'block' : 'none';
+        }
+    });
+}
+
+// Add proxy entry
+if (addProxyBtn) {
+    addProxyBtn.addEventListener('click', () => {
+        const entries = proxyEntriesContainer.querySelectorAll('.proxy-entry');
+        if (entries.length >= 10) return; // Max 10 proxies
+
+        const entry = document.createElement('div');
+        entry.className = 'proxy-entry';
+        entry.innerHTML = `
+            <select class="proxy-type">
+                <option value="socks5" selected>SOCKS5</option>
+                <option value="socks4">SOCKS4</option>
+                <option value="http">HTTP</option>
+            </select>
+            <input type="text" class="proxy-host" placeholder="127.0.0.1" maxlength="253">
+            <input type="number" class="proxy-port" placeholder="9050" min="1" max="65535">
+            <button class="btn-remove-proxy" title="Remove proxy">&times;</button>
+        `;
+        proxyEntriesContainer.appendChild(entry);
+        updateRemoveButtons();
+    });
+}
+
+// Remove proxy entry (event delegation)
+if (proxyEntriesContainer) {
+    proxyEntriesContainer.addEventListener('click', (e) => {
+        if (e.target.classList.contains('btn-remove-proxy') && !e.target.disabled) {
+            e.target.closest('.proxy-entry').remove();
+            updateRemoveButtons();
+        }
+    });
+}
+
+function updateRemoveButtons() {
+    const entries = proxyEntriesContainer?.querySelectorAll('.proxy-entry') || [];
+    entries.forEach(entry => {
+        const btn = entry.querySelector('.btn-remove-proxy');
+        if (btn) btn.disabled = entries.length <= 1;
+    });
+}
+
+function getProxyConfig() {
+    if (!proxychainsToggle?.checked) return null;
+
+    const entries = proxyEntriesContainer?.querySelectorAll('.proxy-entry') || [];
+    const proxies = [];
+
+    entries.forEach(entry => {
+        const type = entry.querySelector('.proxy-type')?.value || 'socks5';
+        const host = entry.querySelector('.proxy-host')?.value.trim();
+        const port = parseInt(entry.querySelector('.proxy-port')?.value);
+
+        if (host && port && port >= 1 && port <= 65535) {
+            proxies.push({ type, host, port });
+        }
+    });
+
+    if (proxies.length === 0) return null;
+
+    return {
+        enabled: true,
+        chainType: chainTypeSelect?.value || 'dynamic',
+        proxies
+    };
+}
 
 // Input validation visual feedback
 targetIPInput.addEventListener('input', () => {
@@ -178,6 +274,13 @@ async function startScan() {
         return;
     }
 
+    // Validate proxychains config
+    const proxyConfig = getProxyConfig();
+    if (proxychainsToggle?.checked && !proxyConfig) {
+        addTerminalLine('ERROR', 'Proxychains enabled but no valid proxies configured. Add at least one proxy (host + port).', 'red');
+        return;
+    }
+
     isScanning = true;
     scanAbortController = new AbortController();
 
@@ -192,19 +295,25 @@ async function startScan() {
     scanResults = [];
     resultsContainer.innerHTML = '';
 
-    addTerminalLine('INFO', `Starting ${scanType.toUpperCase()} scan on ${target}`, 'cyan');
+    const proxyLabel = proxyConfig ? ` via proxychains (${proxyConfig.chainType})` : '';
+    addTerminalLine('INFO', `Starting ${scanType.toUpperCase()} scan on ${target}${proxyLabel}`, 'cyan');
 
     try {
+        const requestBody = {
+            target: target,
+            scanType: scanType,
+            ports: ports,
+            timing: timing,
+            skipDiscovery: skipDiscovery
+        };
+        if (proxyConfig) {
+            requestBody.proxychains = proxyConfig;
+        }
+
         const response = await fetch(`${API_BASE_URL}/scan`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                target: target,
-                scanType: scanType,
-                ports: ports,
-                timing: timing,
-                skipDiscovery: skipDiscovery
-            }),
+            body: JSON.stringify(requestBody),
             signal: scanAbortController.signal
         });
 
