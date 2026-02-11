@@ -20,6 +20,8 @@ const proxychainsConfig = document.getElementById('proxychainsConfig');
 const chainTypeSelect = document.getElementById('chainType');
 const proxyEntriesContainer = document.getElementById('proxyEntries');
 const addProxyBtn = document.getElementById('addProxy');
+const importProxiesBtn = document.getElementById('importProxies');
+const proxyFileInput = document.getElementById('proxyFileInput');
 const proxychainsStatusSpan = document.getElementById('proxychainsStatus');
 
 // Export Buttons
@@ -164,20 +166,7 @@ if (addProxyBtn) {
     addProxyBtn.addEventListener('click', () => {
         const entries = proxyEntriesContainer.querySelectorAll('.proxy-entry');
         if (entries.length >= 10) return; // Max 10 proxies
-
-        const entry = document.createElement('div');
-        entry.className = 'proxy-entry';
-        entry.innerHTML = `
-            <select class="proxy-type">
-                <option value="socks5" selected>SOCKS5</option>
-                <option value="socks4">SOCKS4</option>
-                <option value="http">HTTP</option>
-            </select>
-            <input type="text" class="proxy-host" placeholder="127.0.0.1" maxlength="253">
-            <input type="number" class="proxy-port" placeholder="9050" min="1" max="65535">
-            <button class="btn-remove-proxy" title="Remove proxy">&times;</button>
-        `;
-        proxyEntriesContainer.appendChild(entry);
+        addProxyEntry();
         updateRemoveButtons();
     });
 }
@@ -190,6 +179,123 @@ if (proxyEntriesContainer) {
             updateRemoveButtons();
         }
     });
+}
+
+// Import proxies from file
+if (importProxiesBtn && proxyFileInput) {
+    importProxiesBtn.addEventListener('click', () => {
+        proxyFileInput.value = '';
+        proxyFileInput.click();
+    });
+
+    proxyFileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // 100KB limit
+        if (file.size > 102400) {
+            addTerminalLine('ERROR', 'Proxy file too large (max 100KB)', 'red');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            const text = evt.target.result;
+            const parsed = parseProxyFile(text);
+
+            if (parsed.length === 0) {
+                addTerminalLine('WARNING', 'No valid proxies found in file. Supported formats: "socks5 host port", "socks5://host:port", or "host:port"', 'yellow');
+                return;
+            }
+
+            // Clear existing entries before importing
+            proxyEntriesContainer.innerHTML = '';
+
+            // Cap at 10
+            const toAdd = parsed.slice(0, 10);
+            toAdd.forEach(proxy => addProxyEntry(proxy.type, proxy.host, proxy.port));
+            updateRemoveButtons();
+
+            const skipped = parsed.length - toAdd.length;
+            let msg = `Imported ${toAdd.length} proxies from ${file.name}`;
+            if (skipped > 0) msg += ` (${skipped} skipped, max 10)`;
+            addTerminalLine('SUCCESS', msg, 'green');
+        };
+        reader.onerror = () => {
+            addTerminalLine('ERROR', 'Failed to read proxy file', 'red');
+        };
+        reader.readAsText(file);
+    });
+}
+
+function parseProxyFile(text) {
+    const validTypes = ['socks4', 'socks5', 'http', 'https'];
+    const proxies = [];
+    const lines = text.split(/\r?\n/);
+
+    for (const raw of lines) {
+        const line = raw.trim();
+        // Skip empty lines and comments
+        if (!line || line.startsWith('#') || line.startsWith('//') || line.startsWith(';')) continue;
+
+        let type = null, host = null, port = null;
+
+        // Format: type://host:port
+        const uriMatch = line.match(/^(socks[45]|https?):\/\/([^:\/\s]+):(\d+)/i);
+        if (uriMatch) {
+            type = uriMatch[1].toLowerCase();
+            host = uriMatch[2];
+            port = parseInt(uriMatch[3]);
+        }
+
+        // Format: type host port (space or tab separated)
+        if (!type) {
+            const parts = line.split(/[\s\t]+/);
+            if (parts.length >= 3 && validTypes.includes(parts[0].toLowerCase())) {
+                type = parts[0].toLowerCase();
+                host = parts[1];
+                port = parseInt(parts[2]);
+            }
+        }
+
+        // Format: host:port (default to socks5)
+        if (!type) {
+            const simpleMatch = line.match(/^([^:\/\s]+):(\d+)$/);
+            if (simpleMatch) {
+                type = 'socks5';
+                host = simpleMatch[1];
+                port = parseInt(simpleMatch[2]);
+            }
+        }
+
+        // Normalize https -> http for proxychains compatibility
+        if (type === 'https') type = 'http';
+
+        // Validate
+        if (type && host && port && port >= 1 && port <= 65535) {
+            if (!['socks4', 'socks5', 'http'].includes(type)) continue;
+            if (!/^[a-zA-Z0-9]([a-zA-Z0-9.\-]*[a-zA-Z0-9])?$/.test(host)) continue;
+            if (host.length > 253) continue;
+            proxies.push({ type, host, port });
+        }
+    }
+
+    return proxies;
+}
+
+function addProxyEntry(type = 'socks5', host = '', port = '') {
+    const entry = document.createElement('div');
+    entry.className = 'proxy-entry';
+    const typeOptions = ['socks5', 'socks4', 'http'].map(t =>
+        `<option value="${t}"${t === type ? ' selected' : ''}>${t.toUpperCase()}</option>`
+    ).join('');
+    entry.innerHTML = `
+        <select class="proxy-type">${typeOptions}</select>
+        <input type="text" class="proxy-host" placeholder="127.0.0.1" maxlength="253" value="${sanitizeHTML(String(host))}">
+        <input type="number" class="proxy-port" placeholder="9050" min="1" max="65535" value="${port ? Number(port) : ''}">
+        <button class="btn-remove-proxy" title="Remove proxy">&times;</button>
+    `;
+    proxyEntriesContainer.appendChild(entry);
 }
 
 function updateRemoveButtons() {

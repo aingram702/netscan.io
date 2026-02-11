@@ -977,7 +977,14 @@ body::before {
     cursor: not-allowed;
 }
 
-.btn-add-proxy {
+.proxy-button-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.btn-add-proxy,
+.btn-import-proxy {
     padding: 6px 12px;
     background: rgba(128, 0, 255, 0.15);
     border: 1px dashed #8000ff;
@@ -986,12 +993,24 @@ body::before {
     font-family: 'Fira Code', monospace;
     font-size: 0.8rem;
     cursor: pointer;
-    margin-top: 4px;
     transition: all 0.2s;
 }
 
-.btn-add-proxy:hover {
+.btn-add-proxy:hover,
+.btn-import-proxy:hover {
     background: rgba(128, 0, 255, 0.3);
+}
+
+.btn-import-proxy {
+    border-style: solid;
+}
+
+.proxy-notes code {
+    background: rgba(0, 0, 0, 0.4);
+    padding: 1px 4px;
+    border-radius: 2px;
+    color: #00ff41;
+    font-size: 0.65rem;
 }
 
 .proxy-notes {
