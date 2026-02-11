@@ -148,11 +148,16 @@
                                 <button class="btn-remove-proxy" title="Remove proxy" disabled>&times;</button>
                             </div>
                         </div>
-                        <button id="addProxy" class="btn btn-small btn-add-proxy">+ Add Proxy</button>
+                        <div class="proxy-button-row">
+                            <button id="addProxy" class="btn btn-small btn-add-proxy">+ Add Proxy</button>
+                            <button id="importProxies" class="btn btn-small btn-import-proxy">📂 Import List</button>
+                            <input type="file" id="proxyFileInput" accept=".txt,.csv,.conf,.list" style="display:none">
+                        </div>
 
                         <div class="proxy-notes">
                             <small>TCP scans only. SYN/UDP/ICMP bypass proxies.<br>
-                            Random chain rotates proxy per connection for anonymity.</small>
+                            Random chain rotates proxy per connection for anonymity.<br>
+                            Import supports: <code>socks5 127.0.0.1 9050</code>, <code>socks5://127.0.0.1:9050</code>, or <code>127.0.0.1:9050</code></small>
                         </div>
                     </div>
                 </div>
