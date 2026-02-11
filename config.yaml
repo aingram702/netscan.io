@@ -1,0 +1,22 @@
+name: "NetScanner Pro"
+description: "Real nmap-powered network scanner with proxychains, real-time visualization, and PDF reports"
+version: "3.1.0"
+slug: "netscan"
+url: "https://github.com/aingram702/netscan.net"
+arch:
+  - amd64
+  - aarch64
+  - armv7
+  - armhf
+  - i386
+startup: "application"
+boot: "auto"
+ingress: true
+ingress_port: 5000
+panel_icon: "mdi:lan"
+panel_title: "NetScanner"
+host_network: true
+map:
+  - share:rw
+options: {}
+schema: {}

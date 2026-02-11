@@ -74,8 +74,8 @@ function setLoadingState(isLoading) {
     }
 }
 
-// API Configuration - use the actual port the page was served on
-const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:${window.location.port || '5000'}/api`;
+// API Configuration - resolves correctly for both standalone and reverse proxy (e.g., HA ingress)
+const API_BASE_URL = new URL('api', window.location.href).pathname;
 
 // Initialize - fetch server status
 document.addEventListener('DOMContentLoaded', async () => {

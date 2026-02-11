@@ -31,6 +31,7 @@ A web-based network scanner that wraps **real nmap** with a modern UI, real-time
 ## Table of Contents
 
 - [Quick Start](#-quick-start)
+- [Home Assistant Add-on](#-home-assistant-add-on)
 - [Prerequisites](#prerequisites)
 - [Scan Types](#-scan-types)
 - [Timing Profiles](#-timing-profiles)
@@ -133,6 +134,41 @@ Open **http://localhost:5000** in your browser.
 | **unprivileged** | ping, quick, full, service, vuln | Stealth falls back to TCP connect. OS detection disabled. UDP scan blocked. Aggressive scan limited. |
 
 > The server auto-detects privilege level and shows it in both the terminal startup banner and the web UI header.
+
+---
+
+## Home Assistant Add-on
+
+NetScanner Pro can run as a **Home Assistant add-on** with full sidebar integration.
+
+### Add-on Store (remote repository)
+
+1. Go to **Settings > Add-ons > Add-on Store**
+2. Click the three-dot menu (top right) > **Repositories**
+3. Add: `https://github.com/aingram702/netscan.net`
+4. Find **NetScanner Pro** and click **Install**
+5. Click **Start** - it appears as **NetScanner** in the sidebar
+
+### Local Add-on (manual)
+
+```bash
+cd /addons
+git clone https://github.com/aingram702/netscan.net.git netscan
+```
+
+Then refresh the add-on store - NetScanner Pro appears under **Local add-ons**.
+
+### How It Works
+
+| Feature | Details |
+|---------|---------|
+| **Sidebar** | Appears as "NetScanner" with a `mdi:lan` icon via HA ingress |
+| **Network** | Runs with `host_network: true` so nmap can reach your LAN |
+| **Auth** | Protected by HA's authentication - no separate login needed |
+| **Container** | Debian-based Docker image with nmap and proxychains4 pre-installed |
+| **Port** | Listens on port 5000 internally; accessed through HA's ingress proxy |
+
+> The add-on runs as root inside the container, giving full access to all 9 scan types without limitations.
 
 ---
 
@@ -302,6 +338,11 @@ netscan.net/
 ├── styles.css          # Dark theme, port states, vuln severity, proxy styles
 ├── requirements.txt    # Flask, flask-cors, python-nmap
 ├── exports/            # Server-side JSON exports (auto-cleaned)
+├── config.yaml         # Home Assistant add-on metadata
+├── build.yaml          # HA add-on build config (per-architecture base images)
+├── Dockerfile          # HA add-on container build
+├── run.sh              # HA add-on container entry point
+├── DOCS.md             # HA add-on documentation tab
 └── README.md           # This file
 ```
 
