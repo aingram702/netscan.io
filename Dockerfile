@@ -21,8 +21,7 @@ COPY server.py script.js index.html styles.css ./
 # Create exports directory
 RUN mkdir -p /app/exports
 
-# Copy run script
-COPY run.sh /
-RUN chmod a+x /run.sh
-
-CMD ["/run.sh"]
+# Register as s6-overlay service (s6 init must be PID 1)
+RUN mkdir -p /etc/services.d/netscan
+COPY run.sh /etc/services.d/netscan/run
+RUN chmod a+x /etc/services.d/netscan/run
